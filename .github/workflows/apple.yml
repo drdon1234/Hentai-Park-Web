@@ -1,0 +1,86 @@
+name: Apple 构建与运行检查
+run-name: Apple · ${{ inputs.candidate || 'apple-candidate' }}
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: 本仓库的候选分支或完整提交 SHA
+        required: true
+        default: apple-candidate
+        type: string
+permissions:
+  contents: read
+jobs:
+  environment:
+    name: Xcode 和模拟器可用性
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcodebuild -showsdks
+          python3 ci/simulator.py check
+  candidate:
+    name: 候选构建、打包和启动
+    runs-on: macos-15
+    timeout-minutes: 150
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate }}
+          path: candidate
+          persist-credentials: false
+      - name: 记录候选和实际工具版本
+        run: |
+          set -euo pipefail
+          mkdir -p test/evidence
+          git -C candidate rev-parse HEAD | tee test/evidence/candidate.txt
+          xcodebuild -version | tee test/evidence/xcode.txt
+          xcrun simctl list runtimes | tee test/evidence/runtimes.txt
+          df -h .
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: 安装构建依赖
+        working-directory: candidate
+        run: |
+          set -euo pipefail
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios aarch64-apple-darwin x86_64-apple-darwin
+          cd clients/web
+          npm install -g "$(node -p 'require("./package.json").packageManager')"
+          pnpm --filter '@hentai-park/source-runner...' install --frozen-lockfile
+      - name: 构建 Rust 绑定和 Apple 应用
+        working-directory: candidate
+        run: |
+          set -euo pipefail
+          python3 tools/build_apple_core.py
+      - id: package
+        name: 生成侧载和桌面产物
+        run: bash ci/package.sh
+      - name: 启动 macOS 客户端
+        run: bash ci/macos.sh
+      - name: 依次启动 iPhone 和 iPad 客户端
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        run: python3 ci/simulator.py launch
+      - name: 保存应用与证据
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test/evidence/
+            test/packages/
+          retention-days: 7

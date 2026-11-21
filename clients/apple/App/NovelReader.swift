@@ -331,7 +331,7 @@ private enum NovelFailure {
     do {
       try render(document, next)
       error = nil
-    } catch { error = .mode(next) }
+    } catch { self.error = .mode(next) }
   }
 
   private func resize(to value: Double) {

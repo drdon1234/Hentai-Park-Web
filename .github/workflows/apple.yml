@@ -142,14 +142,14 @@ jobs:
               raise SystemExit("构建运行与指定候选或工作流不一致")
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
-                                     "82845468b9211df2cff6cfe8f90267c28a6440373fca4376ed914e1c3d6e7ddd" if os.environ["EXERCISE_SCOPE"] == "record" else
-                                     "db6e2c4e63ed7ac8d407509f0f06ee22f8b0c22cde1b8357b54360ea3d031fb1" if os.environ["EXERCISE_SCOPE"] == "native" else
-                                     "35e2e6430f4fa73b639864b277740b15f7d91177f383cb51ad6a7613a049ddd4" if os.environ["EXERCISE_SCOPE"] == "review" else
-                                     "032dbe9af4f150ded59109c3c88e74881ca5a14f3dea8e8d28deb33bfc567fad" if os.environ["EXERCISE_SCOPE"] == "write" else
-                                     "552f7918fb0979921ae22806ebf86943a3e38330f3402d99936e23810e5ae168" if os.environ["EXERCISE_SCOPE"] in ("capture","layout") else
-                                     "d41911de85be79be91f38b92df84e7eb29cd4a7a82a51233c0bf6eb0bc310f8f" if os.environ["EXERCISE_SCOPE"] == "queue" else
-                                     "b8a5aa5adc05b2aed77dab74f3377c34b259ac0786043dd5579fd84971605fd7" if os.environ["EXERCISE_SCOPE"] == "media" else
-                                     "a72332d2835414d75745e882cfa652b2989879fa3027ba70d49323aefafbedfb"):
+                                     "2c9e4cbc400d00868e77f0c59b4ea0547bba6180484f8606414c15987187486d" if os.environ["EXERCISE_SCOPE"] == "record" else
+                                     "078f2c9b0bcf6d0db8b9022be57d006d1dc36ec4e236f8f875db69b355287982" if os.environ["EXERCISE_SCOPE"] == "native" else
+                                     "7e49d8404143c4fbec4359371dd521f552ab12eec5690b7aeea7dd1982d1154b" if os.environ["EXERCISE_SCOPE"] == "review" else
+                                     "734e5829ce546d3b7dd5ab32d0411ff3ff7ed9962ca7777e4a1836601e471c31" if os.environ["EXERCISE_SCOPE"] == "write" else
+                                     "4a566e7344d15f7206377139228ea6c04eee3f3ab1307c66aa1a9bb6f8b8c7ef" if os.environ["EXERCISE_SCOPE"] in ("capture","layout") else
+                                     "f95dcb568f92afb2566f8888f623022d1bf5e5e693b282eeea57ca521a21d99e" if os.environ["EXERCISE_SCOPE"] == "queue" else
+                                     "e9694d1a199b47503ca4e019f6d52e6d62cf6f7d49497b8d756d3eecd464a326" if os.environ["EXERCISE_SCOPE"] == "media" else
+                                     "e88e7ded996f6baf88bb1d89ca21bc10ab5cc6acd7b9597274698d2eac42009d"):
               raise SystemExit("验收文件摘要与工作流核定值不一致")
           pathlib.Path("test/reader_flow.py").write_bytes(raw)
           PY

@@ -129,7 +129,7 @@ jobs:
               raise SystemExit("构建运行与指定候选或工作流不一致")
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
-                                     "7f7a03354aa2cc7b0ee2fb439c049d27ec5227037bcfeb10b5611f79ef9e33d7"):
+                                     "17200e174a22593ffa4202baa6e22e732507d08781c748292fd0f6378864fc19"):
               raise SystemExit("验收文件摘要与工作流核定值不一致")
           pathlib.Path("test/reader_flow.py").write_bytes(raw)
           PY

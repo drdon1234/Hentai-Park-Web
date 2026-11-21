@@ -148,7 +148,7 @@ jobs:
                                      "dffcab6cc131d7977d519146e8bf6328c9238678a1310bf5f501fc8e85219c76" if os.environ["EXERCISE_SCOPE"] == "write" else
                                      "d32b32d05ab1aefceabd8af3d9199286035aeadcf11365fec740116639104278" if os.environ["EXERCISE_SCOPE"] in ("capture","layout") else
                                      "93145c0e14f0edccb449392d8123d57f8a8648d0480733bed7e59dd15c85a08c" if os.environ["EXERCISE_SCOPE"] == "queue" else
-                                     "669e5419a50faa66abb2cc40c25b988ed1789f1baa50d459425096227e095cde" if os.environ["EXERCISE_SCOPE"] == "media" else
+                                     "a1ae989d867be810a4a6c143c1baefd3b17e7a9197909e28dafc1ebf7b5a95ab" if os.environ["EXERCISE_SCOPE"] == "media" else
                                      "499bb814d6ee09810b1ae3eaa2dee39825038b5a3dc4df759239bbd301e1bcc5"):
               raise SystemExit("验收文件摘要与工作流核定值不一致")
           pathlib.Path("test/reader_flow.py").write_bytes(raw)

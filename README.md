@@ -4,4 +4,6 @@
 
 每次运行独立检查 Xcode 和已安装的 iPhone、iPad 模拟器，记录候选 SHA，随后构建 Rust 核心、Swift 绑定和三个 Apple 目标。应用启动检查要求产生书库数据表。运行结果和模拟器截图保留七天。运行时版本见附件。
 
-成功打包后可从该次运行的 Artifacts 下载 iOS 未签名 IPA、macOS 临时签名 ZIP 与 SHA-256 摘要。iOS 用户需自行侧载签名，macOS 产物未经 Developer ID 签名和公证。流水线不创建 Release。实体设备覆盖升级和旧钥匙串访问需要另行验收。
+成功打包后可从该次运行的 Artifacts 下载 iOS 未签名 IPA、iOS 模拟器应用 ZIP、macOS 临时签名 ZIP 与 SHA-256 摘要。macOS 启动检查使用解压后的桌面应用。iOS 用户需自行侧载签名，macOS 产物未经 Developer ID 签名和公证。流水线不创建 Release。实体设备覆盖升级和旧钥匙串访问需要另行验收。
+
+复验已有候选时，在同一工作流填写完整的 `candidate`、原构建的 `package_run` 和经工作流摘要核定的验收文件 `suite`（Base64）。用例在本地根目录 `test/` 维护。工作流核对原运行、候选 SHA 和包摘要，在三个独立运行器中验证 iPhone、iPad 和 macOS。各项操作结果与截图分平台保存，未运行的步骤保持待验。

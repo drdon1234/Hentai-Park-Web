@@ -40,7 +40,7 @@ public actor ProgressSession {
     private var store: ProgressStore?
     let directory: URL
     private var pending: [UUID: Pending] = [:]
-    var downloadRequests: [DownloadID: [UUID: Request]] = [:]
+    var downloadRequests: [LibraryWorkID: [UUID: Request]] = [:]
 
     private init(store: ProgressStore, directory: URL) {
         self.store = store

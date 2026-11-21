@@ -289,6 +289,7 @@ private final class LibraryModel: ObservableObject {
         case work(LibraryWork), chapter(ChapterKey)
     }
     @State private var destination: Destination?
+    @State private var expandedDownloads = Set<LibraryWorkID>()
     private let labels = librarySections
     private let symbols = ["safari", "heart", "arrow.down.circle", "person.crop.circle"]
     @Environment(\.sizeCategory) private var textSize
@@ -369,7 +370,7 @@ private final class LibraryModel: ObservableObject {
     private var sectionPicker: some View {
         Picker(access.tr("书库"), selection: selection) {
             ForEach(labels.indices, id: \.self) { index in Text(access.tr(labels[index])).tag(index) }
-        }.pickerStyle(.segmented).padding()
+        }.pickerStyle(.segmented).labelsHidden().padding()
     }
 
     @ViewBuilder private var compact: some View {
@@ -421,16 +422,32 @@ private final class LibraryModel: ObservableObject {
                 }
                 Section(header: Text(access.tr(index == 0 ? "继续看" : labels[index]))) {
                     if filtered.isEmpty { Text(access.tr(["没有继续阅读的作品","还没有收藏","没有下载任务"][index])) }
-                    ForEach(filtered, id: \.self) { work in
+                    ForEach(filtered, id: \.libraryID) { work in
                         VStack(alignment: .leading, spacing: 8) {
                             if index == 0, let chapter = work.historyChapter,
                                ["comic","novel","video","voice","bundle"].contains(work.media), work.contentDomain != "live" {
                                 Button(work.title) { open(work, chapter) }
                             } else if work.downloaded, !work.invalidDownload, !work.chapters.isEmpty,
                                       ["comic","video","novel","bundle"].contains(work.media) {
-                                DisclosureGroup(work.title) {
+                                let expanded = expandedDownloads.contains(work.libraryID)
+                                Button {
+                                    if expanded { expandedDownloads.remove(work.libraryID) }
+                                    else { expandedDownloads.insert(work.libraryID) }
+                                } label: {
+                                    HStack {
+                                        Text(work.title)
+                                        Spacer()
+                                        Image(systemName: expanded ? "chevron.down" : "chevron.forward")
+                                            .accessibilityHidden(true)
+                                    }.contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(Text(work.title))
+                                .accessibilityHint(Text(access.tr(expanded ? "收起" : "展开")))
+                                if expanded {
                                     ForEach(work.chapters, id: \.id) { chapter in
                                         Button(chapter.title) { open(work, chapter.id) }
+                                            .buttonStyle(.borderless)
                                     }
                                 }
                             } else if index != 2 {

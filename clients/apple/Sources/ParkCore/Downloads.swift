@@ -13,9 +13,13 @@ private struct DownloadPreferences: Decodable, Sendable {
   }
 }
 
-struct DownloadID: Hashable, Sendable {
+public struct LibraryWorkID: Hashable, Sendable {
   let source: String
   let work: String
+}
+
+public extension LibraryWork {
+  var libraryID: LibraryWorkID { LibraryWorkID(source: source, work: workId) }
 }
 
 extension ProgressSession {
@@ -58,13 +62,13 @@ extension ProgressSession {
       try store.setDownloadQueued(source: work.source, work: work.workId, resume: resume)
     }
     if !resume {
-      let id = DownloadID(source: work.source, work: work.workId)
+      let id = work.libraryID
       downloadRequests[id]?.values.forEach { $0.cancel() }
     }
   }
 
   private func download(
-    _ library: SourceLibrary, id: DownloadID, sites: UInt32, works: UInt32, pages: UInt32
+    _ library: SourceLibrary, id: LibraryWorkID, sites: UInt32, works: UInt32, pages: UInt32
   ) async throws -> Bool {
     let token = UUID(), request = Request(), root = directory
     downloadRequests[id, default: [:]][token] = request
@@ -88,13 +92,13 @@ extension ProgressSession {
     let sites = settings.limit(settings.downloadSiteConcurrency, default: 3)
     let works = settings.limit(settings.downloadTaskConcurrency, default: 1)
     let pages = settings.limit(settings.downloadConcurrency, default: 3)
-    var failed = Set<DownloadID>()
+    var failed = Set<LibraryWorkID>()
     while true {
       try Task.checkCancellation()
-      let pending = try await libraryWorks().compactMap { work -> DownloadID? in
+      let pending = try await libraryWorks().compactMap { work -> LibraryWorkID? in
         guard !work.invalidDownload, work.pendingDeletion == nil,
           work.downloadStatus == 0 || work.downloadStatus == 1 else { return nil }
-        return DownloadID(source: work.source, work: work.workId)
+        return work.libraryID
       }
       let ready = pending.filter { !failed.contains($0) }
       guard !ready.isEmpty else {
@@ -103,9 +107,9 @@ extension ProgressSession {
       }
       // 先轮询一次所有作品，让另一站点可以利用空闲的站点额度。
       var ran = false
-      try await withThrowingTaskGroup(of: (DownloadID, Bool?).self) { group in
+      try await withThrowingTaskGroup(of: (LibraryWorkID, Bool?).self) { group in
         var remaining = ready.makeIterator()
-        func submit(_ id: DownloadID) {
+        func submit(_ id: LibraryWorkID) {
           group.addTask {
             do {
               let done = try await self.download(library, id: id, sites: sites, works: works, pages: pages)

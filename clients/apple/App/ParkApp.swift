@@ -376,14 +376,20 @@ private final class LibraryModel: ObservableObject {
     @ViewBuilder private var compact: some View {
         #if os(iOS)
         NavigationView {
-            TabView(selection: selection) {
-                ForEach(labels.indices, id: \.self) { index in
-                    section(index).tabItem { rootLabel(index) }.tag(index)
+            ZStack {
+                NavigationLink(isActive: Binding(
+                    get: { destination != nil },
+                    set: { presented in if !presented { leaveChapter() } }
+                )) {
+                    detail(showBack: false)
+                } label: { EmptyView() }
+                .accessibilityHidden(true)
+                TabView(selection: selection) {
+                    ForEach(labels.indices, id: \.self) { index in
+                        section(index).tabItem { rootLabel(index) }.tag(index)
+                    }
                 }
             }
-            .background(NavigationLink(isActive: Binding(get: { destination != nil }, set: { if !$0 { leaveChapter() } })) {
-                detail(showBack: false)
-            } label: { EmptyView() })
             .navigationBarHidden(true)
         }.navigationViewStyle(.stack)
         #else

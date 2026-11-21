@@ -17,4 +17,5 @@ mac="$out/derived/Build/Products/Release/HentaiPark.app"
 codesign --verify --deep --strict "$mac"
 ditto -c -k --keepParent "$mac" "$out/packages/HentaiPark-macOS-adhoc.zip"
 build_app 'iOS Simulator' CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGN_ENTITLEMENTS=
+ditto -c -k --keepParent "$out/derived/Build/Products/Release-iphonesimulator/HentaiPark.app" "$out/packages/HentaiPark-ios-simulator.zip"
 (cd "$out/packages" && shasum -a 256 *.ipa *.zip > SHA256SUMS)

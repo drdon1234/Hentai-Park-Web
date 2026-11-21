@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-app="$PWD/test/derived/Build/Products/Release/HentaiPark.app"
+mkdir -p test/unpacked
+ditto -x -k test/packages/HentaiPark-macOS-adhoc.zip test/unpacked
+app="$PWD/test/unpacked/HentaiPark.app"
+codesign --verify --deep --strict "$app"
 bundle=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Contents/Info.plist")
 open -n "$app"
 container="$HOME/Library/Containers/$bundle/Data/Library/Application Support"

@@ -31,7 +31,8 @@ private final class MoviePlayback: ObservableObject, PlaybackOwner {
   private var pending: Task<Bool, Never>?
   private var draining: Task<Void, Never>?
 
-  func load(key: ChapterKey, title: String, incognito: Bool, library: SourceLibrary?, bundle: ChapterKey?, line: Line?)
+  func load(key: ChapterKey, title: String, incognito: Bool, library: SourceLibrary?, bundle: ChapterKey?,
+            recording: RecordingVolume?, line: Line?)
     async
   {
     let closed = close()
@@ -47,9 +48,11 @@ private final class MoviePlayback: ObservableObject, PlaybackOwner {
       guard generation == identity else { throw CancellationError() }
       let session = try await ProgressSession.openApplicationLibrary()
       opened = session
-      let previous = try await session.read(key)
+      let previous = recording == nil ? try await session.read(key) : nil
       let route: PlaybackSession
-      if let bundle {
+      if let recording {
+        route = try await session.recordingMedia(recording)
+      } else if let bundle {
         route = try await session.bundleMedia(bundle, node: key.chapterId)
       } else if let library {
         let choices = try await session.videoChoices(library, key: key)
@@ -112,7 +115,7 @@ private final class MoviePlayback: ObservableObject, PlaybackOwner {
       guard identity == generation else { throw CancellationError() }
       self.session = session
       self.route = route
-      self.key = key
+      self.key = recording == nil ? key : nil
       self.title = title
       self.duration = end
       self.savedDuration = previous.flatMap { $0.durationSeconds > 0 ? $0.durationSeconds : nil }
@@ -257,6 +260,7 @@ struct MovieReader: View {
   let back: () -> Void
   var library: SourceLibrary? = nil
   var bundle: ChapterKey? = nil
+  var recording: RecordingVolume? = nil
   var captions: [VoiceNode] = []
   var tracks: [VoiceNode] = []
   var playOnOpen = true
@@ -353,7 +357,7 @@ struct MovieReader: View {
       webReady = false
       webFailed = false
       await playback.load(
-        key: key, title: title, incognito: incognito, library: library, bundle: bundle, line: line)
+        key: key, title: title, incognito: incognito, library: library, bundle: bundle, recording: recording, line: line)
       while !Task.isCancelled && playback.player != nil && !playback.failed {
         do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }
         playback.tick()

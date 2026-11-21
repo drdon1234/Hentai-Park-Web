@@ -4,6 +4,8 @@ import ImageIO
 import LocalAuthentication
 #if os(iOS)
 import UIKit
+#else
+import AppKit
 #endif
 
 private struct PrivacyObscuredKey: EnvironmentKey { static let defaultValue = false }
@@ -28,19 +30,72 @@ extension EnvironmentValues {
 struct ParkApp: App {
     #if os(iOS)
     @UIApplicationDelegateAdaptor(ParkAppDelegate.self) private var delegate
+    #else
+    @NSApplicationDelegateAdaptor(DesktopActivation.self) private var desktop
     #endif
     @StateObject private var access = LibraryAccess()
     @StateObject private var downloads = DownloadQueue()
     @Environment(\.scenePhase) private var phase
 
     var body: some Scene {
-        WindowGroup { ProtectedWindow(access: access).environmentObject(downloads) }
-            .onChange(of: phase) { access.transition($0); downloads.transition($0) }
+        WindowGroup {
+            ProtectedWindow(access: access).environmentObject(downloads).environmentObject(downloads.recordings)
             #if os(macOS)
+                .environmentObject(desktop)
+            #endif
+        }
+            .onChange(of: phase) { downloads.transition($0) }
+            #if os(macOS)
+            .onChange(of: desktop.active) { access.transition($0 ? .active : .inactive) }
             .commands { LibraryCommands(access: access) }
+            #else
+            .onChange(of: phase) { access.transition($0) }
             #endif
     }
 }
+
+#if os(macOS)
+@MainActor private final class DesktopActivation: NSObject, NSApplicationDelegate, ObservableObject {
+    @Published private(set) var active = false
+
+    func applicationDidBecomeActive(_ notification: Notification) { active = true }
+    func applicationWillResignActive(_ notification: Notification) { active = false }
+}
+
+@MainActor private struct DesktopWindowActivity: NSViewRepresentable {
+    @Binding var main: Bool
+
+    func makeNSView(context: Context) -> Monitor {
+        let monitor = Monitor()
+        monitor.changed = { main = $0 }
+        return monitor
+    }
+
+    func updateNSView(_ view: Monitor, context: Context) {}
+
+    final class Monitor: NSView {
+        var changed: ((Bool) -> Void)?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            let center = NotificationCenter.default
+            center.removeObserver(self)
+            guard let window else { return }
+            for name in [NSWindow.didBecomeMainNotification, NSWindow.didResignMainNotification] {
+                center.addObserver(self, selector: #selector(updateActivity(_:)), name: name, object: window)
+            }
+            // 等 SwiftUI 安装好观察视图后同步初始状态，再以原生窗口通知更新。
+            Task { @MainActor [weak self] in self?.updateActivity() }
+        }
+
+        @objc private func updateActivity(_ notification: Notification? = nil) {
+            changed?(window?.isMainWindow == true)
+        }
+    }
+}
+#endif
 
 @MainActor private final class LibraryAccess: ObservableObject {
     @Published private(set) var privacy: LibraryPrivacy?
@@ -133,8 +188,12 @@ struct ParkApp: App {
     @State private var windowID = UUID()
     @Environment(\.scenePhase) private var phase
     #if os(macOS)
+    @EnvironmentObject private var desktop: DesktopActivation
+    @State private var mainWindow = false
+    private var inactive: Bool { !desktop.active || !mainWindow }
     private let captured = false
     #else
+    private var inactive: Bool { phase != .active }
     @State private var captured = true
     @State private var sceneIdentifier: String?
     #endif
@@ -153,7 +212,7 @@ struct ParkApp: App {
                         Button(access.tr(access.failed ? "重试" : "解锁")) { Task { await access.unlock() } }.disabled(access.busy)
                     }
                 } else {
-                    let hide = (phase != .active && (settings.secureScreen == true || settings.appLock == true))
+                    let hide = (inactive && (settings.secureScreen == true || settings.appLock == true))
                         || (captured && settings.secureScreen == true)
                     LibraryWindow(access: access)
                         .environment(\.privacyObscured,hide)
@@ -163,9 +222,12 @@ struct ParkApp: App {
                 Button(access.tr("重试")) { Task { await access.load() } }
             } else { ProgressView() }
         }
-        #if os(iOS)
+        #if os(macOS)
+        .background(DesktopWindowActivity(main: $mainWindow))
+        #else
         .environment(\.windowSceneIdentifier, sceneIdentifier)
-        .background(ScreenCapture(captured: $captured, sceneIdentifier: $sceneIdentifier))
+        .background(ScreenCapture(captured: $captured, sceneIdentifier: $sceneIdentifier)
+            .allowsHitTesting(false).accessibilityHidden(true))
         #endif
         .onAppear {
             if access.privacy?.adultConfirmed == true { downloads.attach(windowID) }
@@ -234,6 +296,8 @@ private struct ScreenCapture: UIViewRepresentable {
     }
     func makeUIView(context: Context) -> ScreenView {
         let view = ScreenView()
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
         view.changed = { captured = $0; sceneIdentifier = $1 }
         view.observeScene()
         return view
@@ -285,7 +349,7 @@ private final class LibraryModel: ObservableObject {
     @State private var group = 0
     @State private var retry = 0
     private enum Destination {
-        case sites, search, subscriptions, updates, rankings
+        case sites, search, subscriptions, updates, rankings, recordings
         case work(LibraryWork), chapter(ChapterKey)
     }
     @State private var destination: Destination?
@@ -412,6 +476,9 @@ private final class LibraryModel: ObservableObject {
         } else if let rows = model.works {
             let filtered = rows.filter { index == 0 ? $0.historyMs != nil : index == 1 ? $0.favorite : $0.downloaded }
             List {
+                if index == 2 {
+                    Button(access.tr("录制分卷")) { destination = .recordings }
+                }
                 if index == 2 && downloads.failed {
                     Text(access.tr("下载失败"))
                     Button(access.tr("重试")) { downloads.refresh(); retry += 1 }
@@ -490,6 +557,8 @@ private final class LibraryModel: ObservableObject {
         } else if case .search? = destination, let session = model.session {
             AggregateSearchPage(session: session, locale: access.locale, incognito: access.privacy?.incognito == true,
                                 tr: access.tr, back: leaveChapter)
+        } else if case .recordings? = destination, let session = model.session {
+            BroadcastRecordings(session: session, tr: access.tr, back: leaveChapter)
         } else if case .sites? = destination, let session = model.session {
             SourceDirectory(session:session, locale:access.locale, incognito:access.privacy?.incognito==true, tr:access.tr, close:leaveChapter)
         } else if case .work(let onlineWork)? = destination, let session = model.session {

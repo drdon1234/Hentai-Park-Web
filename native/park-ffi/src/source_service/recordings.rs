@@ -182,4 +182,14 @@ impl ProgressStore {
             .map_err(|_| SourceFailure::Storage)?;
         Ok(BundleFile { path, resources })
     }
+
+    pub fn play_recording_volume(
+        &self,
+        id: String,
+        volume: u32,
+        request: Arc<Request>,
+    ) -> Result<Arc<PlaybackSession>> {
+        request.check().map_err(|_| SourceFailure::Cancelled)?;
+        offline_route(self.recording_volume(id, volume)?, &request)
+    }
 }

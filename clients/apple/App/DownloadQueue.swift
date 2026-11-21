@@ -6,6 +6,7 @@ import SwiftUI
 #endif
 
 @MainActor final class DownloadQueue: ObservableObject {
+  let recordings = BroadcastRecorder()
   @Published private(set) var revision = 0
   @Published private(set) var failed = false
   private var windows = Set<UUID>()
@@ -38,6 +39,7 @@ import SwiftUI
   func detach(_ window: UUID) {
     windows.remove(window)
     guard windows.isEmpty else { return }
+    recordings.stopAll()
     monitor?.cancel()
     monitor = nil
     wifi = nil

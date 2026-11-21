@@ -284,6 +284,7 @@ enum InstalledSources {
 }
 
 @MainActor struct SiteDetails: View {
+  @EnvironmentObject private var recorder: BroadcastRecorder
   let session: ProgressSession
   let library: SourceLibrary
   let site: InstalledSite
@@ -366,6 +367,17 @@ enum InstalledSources {
                 blocks: article, tr: tr, select: { selectedBlock = $0 })
             }
             if let work {
+              if work.contentDomain == "live", work.media == "video", site.nativeVideo {
+                if recorder.contains(work.libraryID) {
+                  Button(tr("停止录制")) { recorder.stop(work.libraryID) }
+                    .disabled(recorder.isStopping(work.libraryID))
+                } else {
+                  Button(tr("开始录制")) { recorder.start(library, work: work) }
+                }
+                if recorder.failures.contains(work.libraryID) {
+                  Text(tr("录制失败，已保存已有内容"))
+                }
+              }
               Button(tr(work.favorite ? "取消应用内收藏" : "应用内收藏")) {
                 saving = true
                 saveFailed = false

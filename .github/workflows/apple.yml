@@ -8,10 +8,19 @@ on:
         required: true
         default: apple-candidate
         type: string
+      package_run:
+        description: 复验本工作流已有候选包时填入原构建的运行编号
+        required: false
+        type: string
+      suite:
+        description: 仅接受本工作流已核定摘要的脱敏验收文件（Base64）
+        required: false
+        type: string
 permissions:
   contents: read
 jobs:
   environment:
+    if: ${{ !inputs.package_run }}
     name: Xcode 和模拟器可用性
     runs-on: macos-15
     timeout-minutes: 30
@@ -25,6 +34,7 @@ jobs:
           xcodebuild -showsdks
           python3 ci/simulator.py check
   candidate:
+    if: ${{ !inputs.package_run }}
     name: 候选构建、打包和启动
     runs-on: macos-15
     timeout-minutes: 150
@@ -83,4 +93,70 @@ jobs:
           path: |
             test/evidence/
             test/packages/
+          retention-days: 7
+  exercise:
+    name: 已打包客户端业务验证 · ${{ matrix.host }}
+    if: ${{ inputs.package_run != '' }}
+    runs-on: macos-15
+    timeout-minutes: 40
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [iPhone, iPad, macOS]
+    env:
+      PACKAGE_RUN: ${{ inputs.package_run }}
+      CANDIDATE_SHA: ${{ inputs.candidate }}
+      HOST_KIND: ${{ matrix.host }}
+    steps:
+      - name: 核对本仓库的构建运行与验收文件摘要
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEWED_SUITE: ${{ inputs.suite }}
+        run: |
+          set -euo pipefail
+          [[ "$PACKAGE_RUN" =~ ^[0-9]+$ && "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          mkdir -p test/ui-evidence
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PACKAGE_RUN" > test/build.json
+          python3 - <<'PY'
+          import base64, hashlib, hmac, json, os, pathlib
+          run = json.loads(pathlib.Path("test/build.json").read_text())
+          if (run["path"] != ".github/workflows/apple.yml" or run["event"] != "workflow_dispatch"
+                  or run["head_branch"] != "main" or run["status"] != "completed"
+                  or run["display_title"] != "Apple · " + os.environ["CANDIDATE_SHA"]):
+              raise SystemExit("构建运行与指定候选或工作流不一致")
+          raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
+          if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
+                                     "7f7a03354aa2cc7b0ee2fb439c049d27ec5227037bcfeb10b5611f79ef9e33d7"):
+              raise SystemExit("验收文件摘要与工作流核定值不一致")
+          pathlib.Path("test/reader_flow.py").write_bytes(raw)
+          PY
+          attempt=$(jq -r '.run_attempt' test/build.json)
+          gh run download "$PACKAGE_RUN" -R "$GITHUB_REPOSITORY" -n "apple-$PACKAGE_RUN-$attempt" -D test/artifact
+          [[ "$(cat test/artifact/evidence/candidate.txt)" == "$CANDIDATE_SHA" ]]
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 启动候选并记录系统入口与持久化结果
+        run: |
+          set -euo pipefail
+          npm install -g appium@2.19.0
+          if [[ "$HOST_KIND" == macOS ]]; then
+            appium driver install mac2@2.2.2
+          else
+            appium driver install xcuitest@9.10.5
+          fi
+          python -m venv test/venv
+          test/venv/bin/python -m pip install --disable-pip-version-check Pillow==11.3.0
+          test/venv/bin/python -I test/reader_flow.py
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: ui-${{ matrix.host }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test/ui-evidence/
           retention-days: 7

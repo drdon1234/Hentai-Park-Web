@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime]
+        options: [full, runtime, phone]
         default: full
 permissions:
   contents: read
@@ -111,7 +111,7 @@ jobs:
       fail-fast: false
       matrix:
         include: >-
-          ${{ fromJSON(inputs.scope == 'runtime'
+          ${{ fromJSON(inputs.scope == 'phone' && '[{"host":"iPhone","runtime":"26.2"}]' || inputs.scope == 'runtime'
           && '[{"host":"iPhone","runtime":"18.5"},{"host":"iPhone","runtime":"18.6"}]'
           || '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"18.6"},{"host":"iPhone","runtime":"26.2"},{"host":"iPad","runtime":"26.2"},{"host":"macOS","runtime":"host"}]') }}
     env:
@@ -138,7 +138,7 @@ jobs:
               raise SystemExit("构建运行与指定候选或工作流不一致")
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
-                                     "cb33e84e2c505f3759021e3caec80f40428261592df7a22ac130120a9552f78c"):
+                                     "71bf33b935a44734f81ddd5ef490e67e564d63badc294a9ea5f1b9ed506a00aa"):
               raise SystemExit("验收文件摘要与工作流核定值不一致")
           pathlib.Path("test/reader_flow.py").write_bytes(raw)
           PY

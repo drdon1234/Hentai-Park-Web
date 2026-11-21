@@ -1,0 +1,3 @@
+[bindings.csharp]
+namespace = "Park.Native.Bindings"
+access_modifier = "public"

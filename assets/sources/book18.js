@@ -1,0 +1,213 @@
+(function () {
+  'use strict';
+  const HOME = 'https://www.book18.org';
+  function idValue(id) {
+    let s;
+    try {
+      s = decodeURIComponent(String(id));
+    } catch (_) {
+      throw Park.error('NOT_FOUND', '作品编号无效');
+    }
+    if (
+      !/^(?:[1-9]\d{0,12}|chapters\/[^/?#\r\n]{1,250})$/.test(s) ||
+      s.includes('://')
+    )
+      throw Park.error('NOT_FOUND', '作品编号无效');
+    return s;
+  }
+  function urlOf(id) {
+    const s = idValue(id);
+    return (
+      HOME +
+      (s.startsWith('chapters/')
+        ? '/chapters/' + encodeURIComponent(s.slice(9))
+        : '/' + s)
+    );
+  }
+  function href(node, base) {
+    try {
+      const u = new URL(node.getAttribute('href'), base);
+      return u.protocol === 'https:' && u.hostname === 'www.book18.org'
+        ? u
+        : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  async function doc(source, url) {
+    const r = source.http.ensureOk(await source.http.get(url));
+    return Park.html.parse(r.body);
+  }
+  function titleInfo(raw) {
+    const author = raw.match(/\s*作\s*者[：:]\s*([^\s()[\]【】（）]+)/);
+    let title = author
+      ? raw.slice(0, author.index).replace(/[（(【[]\s*$/, '').trim()
+      : raw;
+    const number = '[0-9０-９零〇一二两兩三四五六七八九十百千]+(?:[.．][0-9０-９]+)*',
+      range = number + '(?:[-－—–~～至到]' + number + ')?',
+      episode = new RegExp(
+        '^第?' + range + '[章节節回集篇部卷]?(?:完[结結本]?|全)?(?:[+＋]番外)?$',
+      );
+    // 只收紧明确的集数；书名、英文分词和普通说明中的空格保留。
+    title = title
+      .replace(
+        /\s*([(（\[【])([^()（）\[\]【】]+)([)）\]】])/g,
+        (match, open, inner, close) => {
+          if ('(（[【'.indexOf(open) !== ')）]】'.indexOf(close)) return match;
+          const compact = inner.replace(/\s+/g, '');
+          return episode.test(compact) ? open + compact + close : match;
+        },
+      )
+      .replace(
+        /第[\s0-9０-９零〇一二两兩三四五六七八九十百千.．\-－—–~～至到]+[章节節回集篇部卷]/g,
+        (match) => {
+          const compact = match.replace(/\s+/g, '');
+          return episode.test(compact) ? compact : match;
+        },
+      )
+      .trim();
+    return { title: title || raw, authors: author ? [author[1]] : [] };
+  }
+  function entries(d, base) {
+    const out = [],
+      seen = new Set();
+    for (const a of d.querySelectorAll('.list-group-item a[href]')) {
+      const u = href(a, base);
+      if (!u || !/^\/(?:chapters\/[^?#]+|\d+|article\/\d+)$/.test(u.pathname)) continue;
+      const id = decodeURIComponent(u.pathname.replace(/^\/article\//, '/').slice(1));
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({
+        id,
+        ...titleInfo(Park.html.text(a)),
+        subtitle: '',
+        category: '',
+        tags: [],
+        uploaded: '',
+        cover: '',
+        language: 'zh',
+        mediaKind: 'novel',
+      });
+    }
+    return out;
+  }
+  async function list(source, req, path, params) {
+    const page = Math.max(1, Number(req.page) || 1),
+      u = new URL(path, HOME);
+    for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+    u.searchParams.set('page', page);
+    const d = await doc(source, u.href),
+      next = d.querySelector('.next:not(.disabled) a[href]');
+    return { items: entries(d, u.href), page, hasNext: !!next };
+  }
+  Park.register({
+    i18n: {
+      "zh-Hant": {"色文网":"色文網","中文长篇与短篇小说，支持推荐、搜索、目录和正文阅读": "中文長篇與短篇小說，支援推薦、搜尋、目錄和正文閱讀", "小说目录为空或受限": "小說目錄為空或受限", "请选择章节": "請選擇章節"},
+      "ja": {"色文网":"色文網","中文长篇与短篇小说，支持推荐、搜索、目录和正文阅读": "中国語の長編・短編小説。おすすめ、検索、目次、本文の閲覧に対応", "小说目录为空或受限": "目次が空または制限されています", "请选择章节": "章を選択してください"},
+      "ko": {"色文网":"Book18","中文长篇与短篇小说，支持推荐、搜索、目录和正文阅读": "중국어 장편·단편 소설. 추천, 검색, 목차 및 본문 읽기 지원", "小说目录为空或受限": "소설 목차가 비어 있거나 제한됩니다", "请选择章节": "장을 선택하세요"},
+      "en": {"色文网":"Book18","中文长篇与短篇小说，支持推荐、搜索、目录和正文阅读": "Chinese novels and short stories with recommendations, search, chapter lists and text reading", "小说目录为空或受限": "Novel contents list is empty or restricted", "请选择章节": "Select a chapter"},
+      "es": {"色文网":"Book18","中文长篇与短篇小说，支持推荐、搜索、目录和正文阅读": "Novelas y relatos en chino con recomendaciones, búsqueda, capítulos y lectura", "小说目录为空或受限": "Índice vacío o restringido", "请选择章节": "Selecciona un capítulo"},
+      "ru": {"色文网":"Book18","中文长篇与短篇小说，支持推荐、搜索、目录和正文阅读": "Китайские романы и рассказы: рекомендации, поиск, оглавление и чтение", "小说目录为空或受限": "Оглавление пусто или доступ ограничен", "请选择章节": "Выберите главу"},
+      "ar": {"色文网":"Book18","中文长篇与短篇小说，支持推荐、搜索、目录和正文阅读": "روايات وقصص صينية مع توصيات وبحث وفهرس فصول وقراءة النص", "小说目录为空或受限": "فهرس الرواية فارغ أو مقيد", "请选择章节": "اختر فصلاً"},
+    },
+    key: 'book18',
+    name: '色文网',
+    version: '0.0.11', minAppVersion: '0.9.2',
+    type: 'novel',
+    category: 'novel',
+    language: 'zh',
+    color: '#D99A36',
+    homepage: HOME,
+    domains: ['www.book18.org'],
+    description: '中文长篇与短篇小说，支持推荐、搜索、目录和正文阅读',
+    network: { mode: 'native', vpnHint: true },
+    linkPatterns: ['book18\\.org/(chapters/[^?#\\s]+|[0-9]+)'],
+    idPattern: '^(?:[1-9]\\d*|chapters/.+)$',
+    defaultFeed: 'recommend',
+    feeds: [
+      { key: 'recommend', label: '推荐' },
+      { key: 'popular', label: '热门' },
+      { key: 'latest', label: '最新' },
+      { key: 'short', label: '短篇' },
+      { key: 'categories', label: '分类', options: [{key: 'category', label: '分类', type: 'select', default: '', dynamic: true, values: []}] },
+    ],
+    async filterOptions(req) {
+      if (req.scope !== 'feed' || req.feed !== 'categories' || req.filter !== 'category') return [];
+      const d = await doc(this, HOME), options = [{value: '', label: '全部'}], seen = new Set();
+      for (const a of d.querySelectorAll('a[href]')) {
+        const u = href(a, HOME), m = u && /^\/category\/([1-9]\d*)$/.exec(u.pathname);
+        const label = Park.html.text(a).replace(/\s*\([\d,]+\)\s*$/, '');
+        if (!m || !label || seen.has(m[1])) continue;
+        seen.add(m[1]); options.push({value: m[1], label});
+      }
+      if (!seen.size) throw Park.error('PARSE', '未找到分类');
+      return options;
+    },
+    async feed(key, req) {
+      if (key === 'categories') {
+        const category = String(req.options?.category || '');
+        if (category && !/^[1-9]\d{0,6}$/.test(category)) throw Park.error('CONFIG', '分类无效');
+        return list(this, req, category ? '/category/' + category : '/', {});
+      }
+      if (!['recommend', 'popular', 'latest', 'short'].includes(key))
+        throw Park.error('CONFIG', '未知列表');
+      if (key === 'short') return list(this, req, '/article/index', {});
+      return list(this, req, '/', {
+        sort:
+          key === 'recommend'
+            ? 'score'
+            : key === 'popular'
+              ? 'views'
+              : 'modified',
+      });
+    },
+    async search(req) {
+      return list(this, req, '/', { q: String(req.keyword || '').trim() });
+    },
+    async detail(value) {
+      const id = idValue(value),
+        url = urlOf(id),
+        d = await doc(this, url),
+        info = titleInfo(Park.html.text(d.querySelector('h1')) || id);
+      const chapterItems = id.startsWith('chapters/')
+        ? entries(d, url).filter((e) => /^\d+$/.test(e.id))
+        : null;
+      const chapters = chapterItems?.map((e) => ({ id: e.id, title: e.title })) ?? null;
+      if (chapters && !chapters.length)
+        throw Park.error('PARSE', '小说目录为空或受限');
+      return {
+        id,
+        ...info,
+        cover: '',
+        url,
+        language: 'zh',
+        mediaKind: 'novel',
+        authors: info.authors.length
+          ? info.authors
+          : chapterItems?.find((e) => e.authors.length)?.authors || [],
+        chapters,
+        singleChapterId: chapters ? null : id,
+        tags: [],
+      };
+    },
+    async textChapter(value, chapterId) {
+      const id = idValue(value);
+      if (id.startsWith('chapters/') && !chapterId)
+        throw Park.error('CONFIG', '请选择章节');
+      if (chapterId && !/^\d+$/.test(String(chapterId)))
+        throw Park.error('NOT_FOUND', '章节编号无效');
+      if (!id.startsWith('chapters/') && chapterId && String(chapterId) !== id)
+        throw Park.error('NOT_FOUND', '章节编号无效');
+      const d = await doc(this, urlOf(chapterId || id)),
+        paragraphs = Park.html.paragraphs(d.querySelector('#content.reader'));
+      if (!paragraphs.length) throw Park.error('PARSE', '小说正文为空或受限');
+      return {
+        title: titleInfo(Park.html.text(d.querySelector('h1'))).title,
+        paragraphs,
+      };
+    },
+  });
+})();
+
+// 更新订阅维度由本站插件声明，保留原有浏览入口。
+Park.enableUpdateSubscriptions(Park.__pending, {"dimensions":[{"key":"search","label":"搜索关键词","hint":"输入作品、作者或话题关键词"},{"key":"filter","label":"标签或作者筛选","hint":"从详情页标签菜单添加"},{"key":"work","label":"作品连载","hint":"作品编号或详情链接"}]});

@@ -1,0 +1,6 @@
+[workspace]
+members = ["native/park-ffi", "native/park-daemon", "native/park-domain", "native/park-runtime", "native/park-net", "native/park-storage", "native/park-media", "tools/park-bindgen"]
+resolver = "2"
+
+[workspace.dependencies]
+uniffi = "0.32.2"

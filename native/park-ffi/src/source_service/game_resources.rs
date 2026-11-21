@@ -1,0 +1,302 @@
+use super::*;
+use serde_json::{json, Value};
+use std::collections::HashSet;
+
+fn field<'a>(value: &'a Value, name: &str, limit: usize) -> Result<&'a str> {
+    match value.get(name) {
+        None | Some(Value::Null) => Ok(""),
+        Some(Value::String(s)) if s.len() <= limit && !s.contains('\0') => Ok(s),
+        _ => Err(SourceFailure::Unsupported),
+    }
+}
+
+fn id(value: &Value) -> Result<&str> {
+    let s = field(value, "id", 2048)?;
+    if s.trim().is_empty() {
+        return Err(SourceFailure::Unsupported);
+    }
+    Ok(s)
+}
+
+fn labels(value: &Value, key: &str, max: usize) -> Result<Vec<String>> {
+    if value[key].is_null() {
+        return Ok(Vec::new());
+    }
+    value[key]
+        .as_array()
+        .filter(|a| a.len() <= 100)
+        .ok_or(SourceFailure::Unsupported)?
+        .iter()
+        .map(|entry| {
+            entry
+                .as_str()
+                .filter(|s| s.len() <= max && !s.contains('\0'))
+                .map(str::to_owned)
+                .ok_or(SourceFailure::Unsupported)
+        })
+        .collect()
+}
+
+fn offers(raw: Value) -> Result<Vec<Value>> {
+    let rows = raw
+        .as_array()
+        .filter(|v| v.len() <= 1000)
+        .ok_or(SourceFailure::Unsupported)?;
+    let mut resource_ids = HashSet::new();
+    let mut result = Vec::with_capacity(rows.len());
+    for row in rows {
+        let resource_id = id(row)?;
+        if !resource_ids.insert(resource_id) {
+            return Err(SourceFailure::Unsupported);
+        }
+        let choices = row["channels"]
+            .as_array()
+            .filter(|v| v.len() <= 100)
+            .ok_or(SourceFailure::Unsupported)?;
+        let mut channels = Vec::with_capacity(choices.len());
+        let mut channel_ids = HashSet::new();
+        for choice in choices {
+            let channel_id = id(choice)?;
+            let kind = field(choice, "kind", 16)?;
+            let requires_reply = choice
+                .get("requiresReply")
+                .map(Value::as_bool)
+                .unwrap_or(Some(false))
+                .ok_or(SourceFailure::Unsupported)?;
+            let reply = field(choice, "replyText", 64000)?;
+            if !channel_ids.insert(channel_id)
+                || !matches!(kind, "external" | "direct")
+                || requires_reply && reply.trim().is_empty()
+            {
+                return Err(SourceFailure::Unsupported);
+            }
+            channels.push(json!({"id":channel_id,"kind":kind,"label":field(choice,"label",8192)?,
+                "size":field(choice,"size",1024)?,"requiresReply":requires_reply,"replyText":reply}));
+        }
+        result.push(json!({"id":resource_id,"title":field(row,"title",8192)?,"version":field(row,"version",2048)?,
+            "size":field(row,"size",1024)?,"notes":field(row,"notes",262144)?,"testStatus":field(row,"testStatus",32)?,
+            "platforms":labels(row,"platforms",1024)?,"languages":labels(row,"languages",1024)?,
+            "expired":row["status"]=="expired","channels":channels}));
+    }
+    Ok(result)
+}
+
+fn external_address(raw: &str) -> Result<Url> {
+    if raw.len() > 16384 || raw.chars().any(char::is_control) {
+        return Err(SourceFailure::Unsupported);
+    }
+    let url = Url::parse(raw).map_err(|_| SourceFailure::Unsupported)?;
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || !matches!(
+            url.scheme(),
+            "https" | "http" | "ftps" | "ftp" | "magnet" | "ed2k" | "thunder"
+        )
+    {
+        return Err(SourceFailure::Unsupported);
+    }
+    Ok(url)
+}
+
+fn available_channel<'a>(rows: &'a [Value], resource: &str, channel: &str) -> Result<&'a Value> {
+    rows.iter()
+        .find(|r| r["id"] == resource && r["expired"] == false)
+        .and_then(|row| row["channels"].as_array())
+        .and_then(|channels| channels.iter().find(|c| c["id"] == channel))
+        .ok_or(SourceFailure::Unsupported)
+}
+
+#[derive(Object)]
+pub struct GameOffers {
+    catalog: Arc<SourceCatalog>,
+    source: String,
+    work: String,
+    digest: String,
+    rows: Vec<Value>,
+    host: Arc<RouteHost>,
+}
+
+#[derive(Object)]
+pub struct GameLinks {
+    details: Value,
+    direct: Option<VideoSource>,
+    source: String,
+    host: Arc<RouteHost>,
+}
+
+#[derive(Object)]
+pub struct GameFile {
+    path: PathBuf,
+    _directory: tempfile::TempDir,
+}
+
+#[uniffi::export]
+impl SourceService {
+    pub fn game_offers(
+        &self,
+        source: String,
+        work: String,
+        request: Arc<Request>,
+    ) -> Result<Arc<GameOffers>> {
+        let (manifest, digest) = self
+            .catalog
+            .manifest_with_digest(&source, plugins::budget(&request))?;
+        if manifest["category"] != "game"
+            || manifest["capabilities"]["gameResources"] != true
+            || manifest["capabilities"]["resolveGameResource"] != true
+        {
+            return Err(SourceFailure::Unsupported);
+        }
+        let (_, raw) = self.catalog.invoke_installed(
+            &source,
+            "gameResources",
+            &[work.clone().into()],
+            plugins::budget(&request),
+            Some(&digest),
+        )?;
+        Ok(Arc::new(GameOffers {
+            catalog: self.catalog.clone(),
+            source,
+            work,
+            digest,
+            rows: offers(downloads::checked(raw)?)?,
+            host: self.routes.clone(),
+        }))
+    }
+}
+
+#[uniffi::export]
+impl GameOffers {
+    pub fn entries(&self) -> String {
+        Value::Array(self.rows.clone()).to_string()
+    }
+
+    pub fn resolve(
+        &self,
+        resource: String,
+        channel: String,
+        confirmed_reply: Option<String>,
+        request: Arc<Request>,
+    ) -> Result<Arc<GameLinks>> {
+        let choice = available_channel(&self.rows, &resource, &channel)?;
+        let reply = if choice["requiresReply"] == true {
+            choice["replyText"].as_str()
+        } else {
+            None
+        };
+        if confirmed_reply.as_deref() != reply {
+            return Err(SourceFailure::Unsupported);
+        }
+        let (_, preview) = self.catalog.invoke_installed(
+            &self.source,
+            "gameResources",
+            &[self.work.clone().into()],
+            plugins::budget(&request),
+            Some(&self.digest),
+        )?;
+        let latest = offers(downloads::checked(preview)?)?;
+        let current = available_channel(&latest, &resource, &channel)?;
+        if ["kind", "requiresReply", "replyText"]
+            .iter()
+            .any(|key| choice[*key] != current[*key])
+        {
+            return Err(SourceFailure::Unsupported);
+        }
+        let (manifest, envelope) = self.catalog.invoke_installed(
+            &self.source,
+            "resolveGameResource",
+            &[self.work.clone().into(), resource.into(), channel.into()],
+            plugins::budget(&request),
+            Some(&self.digest),
+        )?;
+        let mut direct = None;
+        let details = if envelope["ok"] == false && envelope["error"]["code"] == "CONFIRM_REQUIRED"
+        {
+            let original = manual_read::confirmation_page(&manifest, &envelope["error"]["url"]);
+            json!({"confirmRequired":true,"original":original.map(|u| u.to_string())})
+        } else {
+            let value = downloads::checked(envelope)?;
+            if value["kind"] != choice["kind"] {
+                return Err(SourceFailure::Unsupported);
+            }
+            let urls = if value["kind"] == "direct" {
+                // 原有动态媒体域授权适用于本次解析；传输分区不携带原站凭据。
+                let address = field(&value, "url", 16384)?;
+                let origin = manifest["media"]["origin"]
+                    .as_str()
+                    .ok_or(SourceFailure::Unsupported)?;
+                direct = Some(VideoSource::from_plugin(
+                    &manifest,
+                    &json!({"url":address,
+                    "headers":{"referer":format!("{}/", origin.trim_end_matches('/'))}}),
+                )?);
+                vec![address.to_owned()]
+            } else {
+                let values = if value["urls"].is_null() {
+                    vec![field(&value, "url", 16384)?.to_owned()]
+                } else {
+                    labels(&value, "urls", 16384)?
+                };
+                if values.is_empty() {
+                    return Err(SourceFailure::Unsupported);
+                }
+                values
+                    .iter()
+                    .map(|s| external_address(s).map(|url| url.to_string()))
+                    .collect::<Result<Vec<_>>>()?
+            };
+            let codes = labels(&value, "extractionCodes", 16384)?;
+            if !value["extractionCodes"].is_null() && codes.len() != urls.len() {
+                return Err(SourceFailure::Unsupported);
+            }
+            json!({"urls":urls,"direct":direct.is_some(),"filename":field(&value,"filename",2048)?,
+                "extractionCodes":codes,"extractionCode":field(&value,"extractionCode",16384)?,"archivePassword":field(&value,"archivePassword",16384)?})
+        };
+        Ok(Arc::new(GameLinks {
+            details,
+            direct,
+            source: self.source.clone(),
+            host: self.host.clone(),
+        }))
+    }
+}
+
+#[uniffi::export]
+impl GameLinks {
+    pub fn details(&self) -> String {
+        self.details.to_string()
+    }
+
+    /// 每次显式保存均从头传输，校验通过才把私有临时文件交给系统导出。
+    pub fn download(&self, request: Arc<Request>) -> Result<Arc<GameFile>> {
+        let line = self.direct.as_ref().ok_or(SourceFailure::Unsupported)?;
+        let session = self
+            .host
+            .sessions
+            .partition(&self.source, Purpose::Media)
+            .map_err(|_| SourceFailure::Storage)?;
+        std::fs::create_dir_all(&self.host.cache).map_err(|_| SourceFailure::Storage)?;
+        let dir = tempfile::Builder::new()
+            .prefix("game-")
+            .tempdir_in(&self.host.cache)
+            .map_err(|_| SourceFailure::Storage)?;
+        let path = self.host.runtime.block_on(park_media::download::game_file(
+            &self.host.transport,
+            &session,
+            line,
+            dir.path(),
+            &request.cancelled,
+        ))?;
+        Ok(Arc::new(GameFile {
+            path,
+            _directory: dir,
+        }))
+    }
+}
+
+#[uniffi::export]
+impl GameFile {
+    pub fn path(&self) -> String {
+        self.path.to_string_lossy().into_owned()
+    }
+}

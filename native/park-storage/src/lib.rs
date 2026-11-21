@@ -1,0 +1,13 @@
+pub mod backup;
+pub mod cookies;
+pub mod desktop;
+pub mod downloads;
+pub mod library;
+pub mod plugins;
+pub mod progress;
+pub mod recovery;
+pub mod recordings;
+pub mod subscriptions;
+pub mod tavern;
+pub mod web;
+pub const SCHEMA: &str = include_str!("schema.sql");

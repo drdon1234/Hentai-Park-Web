@@ -1,0 +1,24 @@
+mod backup;
+mod contract;
+pub use backup::BackupScope;
+mod exports;
+pub use exports::ComicFormat;
+mod novel;
+mod offline;
+mod preferences;
+mod recovery;
+mod source_service;
+mod storage;
+mod tavern;
+mod tavern_chat;
+pub use contract::*;
+pub use novel::*;
+pub use offline::*;
+pub use preferences::*;
+pub use recovery::RecoveryBrowser;
+pub use source_service::*;
+pub use storage::*;
+pub use tavern::*;
+pub use tavern_chat::*;
+
+uniffi::setup_scaffolding!();

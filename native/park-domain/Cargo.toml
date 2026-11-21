@@ -1,0 +1,16 @@
+[package]
+name = "park-domain"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+regress = { version = "0.10", features = ["utf16"] }
+regex-lite = "0.1"
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version="1",features=["preserve_order","arbitrary_precision"] }
+png = "0.18"
+crc32fast = "1"
+time = { version="0.3",features=["parsing"] }
+base64 = "0.22"

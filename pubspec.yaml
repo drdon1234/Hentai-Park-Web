@@ -1,0 +1,86 @@
+name: hentai_park
+description: "HentaiPark - pluggable multi-source comic, video, novel & game client"
+publish_to: 'none'
+
+version: 0.15.4+85
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  flutter_inappwebview: ^6.2.0-beta.3
+  dio: ^5.11.1
+  cookie_jar: ^4.0.9
+  crypto: ^3.0.7
+  image: ^4.11.1
+  pointycastle: ^4.0.0
+  path_provider: ^2.1.6
+  video_player: ^2.14.1
+  scrollable_positioned_list: ^0.3.8
+  url_launcher: ^6.3.3
+  share_plus: ^13.3.1
+  wakelock_plus: ^1.8.1
+  path: ^1.9.1
+  uuid: ^4.6.0
+  drift: ^2.35.2
+  file_picker: ^13.1.0
+  local_auth: ^3.0.2
+  connectivity_plus: ^7.3.2
+  archive: ^4.4.0
+  pdf: ^3.13.1
+  gal: ^2.3.3
+  package_info_plus: ^10.2.2
+  pub_semver: ^2.2.1
+  flutter_tts: ^4.2.5
+  flutter_local_notifications: 22.3.2
+  pasteboard: ^0.5.0
+  cross_file: 0.3.5+5
+  flutter_secure_storage: 10.3.4
+  flutter_markdown_plus: ^1.0.12
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+  drift_dev: ^2.35.1
+  build_runner: ^2.16.2
+  sqlite3: ^3.7.0
+
+flutter:
+  config:
+    enable-swift-package-manager: false
+  uses-material-design: true
+
+  assets:
+    - LICENSE
+    - docs/licenses/
+    - assets/search/
+    - assets/runtime/
+    - assets/sources/
+    - assets/i18n/
+    - assets/tag_translations/ehentai/
+    - assets/tag_translations/nhentai/
+    - assets/tag_translations/jm/
+    - assets/tag_translations/wnacg/
+    - assets/tag_translations/pica/
+    - assets/tag_translations/av123/
+    - assets/tag_translations/cosplaytele/
+    - assets/tag_translations/catalog-fanza/
+    - assets/tag_translations/jable/
+    - assets/tag_translations/nudecosplay/
+    - assets/tag_translations/pixibb/
+    - assets/tag_translations/pixiv/
+    - assets/tag_translations/pornhub/
+    - assets/tag_translations/supjav/
+    - assets/tag_translations/tikporn/
+    - assets/tag_translations/x/
+    - assets/tag_translations/xiuren/
+    - assets/tag_translations/xvideos/
+    - assets/tag_translations/galgamex/
+    - assets/worldbook_terms/

@@ -1,0 +1,20 @@
+[package]
+name = "park-daemon"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+park-domain = { path = "../park-domain" }
+park-storage = { path = "../park-storage" }
+rusqlite = "0.32"
+tokio-util = {version="0.7",features=["io"]}
+url = "2"
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread","net","signal","sync","macros","fs","io-util"] }
+async-stream = "0.3"
+futures-core = "0.3"
+serde_json = "1"
+serde = {version="1",features=["derive"]}
+sha2 = "0.10"
+subtle = "2"

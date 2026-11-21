@@ -142,7 +142,7 @@ jobs:
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
                                      "2fdd2e5c2cdb4f24a377c925703f422b5ceee423803188160cdf36f3bd00a178" if os.environ["EXERCISE_SCOPE"] == "review" else
-                                     "6eb6991f83ee649dfea4f5903ff74eb1061441ac17c9f1c4c86b10bc5e6328c2" if os.environ["EXERCISE_SCOPE"] in ("capture","layout") else
+                                     "e87986b7b58d00c8a4277d5b807b02993230a003754d33b750d2cd7db848f38a" if os.environ["EXERCISE_SCOPE"] in ("capture","layout") else
                                      "d41911de85be79be91f38b92df84e7eb29cd4a7a82a51233c0bf6eb0bc310f8f" if os.environ["EXERCISE_SCOPE"] == "queue" else
                                      "b8a5aa5adc05b2aed77dab74f3377c34b259ac0786043dd5579fd84971605fd7" if os.environ["EXERCISE_SCOPE"] == "media" else
                                      "a72332d2835414d75745e882cfa652b2989879fa3027ba70d49323aefafbedfb"):

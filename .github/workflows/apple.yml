@@ -144,8 +144,8 @@ jobs:
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
                                      "2c9e4cbc400d00868e77f0c59b4ea0547bba6180484f8606414c15987187486d" if os.environ["EXERCISE_SCOPE"] == "record" else
                                      "078f2c9b0bcf6d0db8b9022be57d006d1dc36ec4e236f8f875db69b355287982" if os.environ["EXERCISE_SCOPE"] == "native" else
-                                     "7e49d8404143c4fbec4359371dd521f552ab12eec5690b7aeea7dd1982d1154b" if os.environ["EXERCISE_SCOPE"] == "review" else
-                                     "734e5829ce546d3b7dd5ab32d0411ff3ff7ed9962ca7777e4a1836601e471c31" if os.environ["EXERCISE_SCOPE"] == "write" else
+                                     "836a3e9b2a92a3449e9baec7a351c169d52f859602a9860678169170e45fd12c" if os.environ["EXERCISE_SCOPE"] == "review" else
+                                     "8c765def1d56d7fa6588f85600fd22dd01a77515259fdd57aec8a29704ed96c6" if os.environ["EXERCISE_SCOPE"] == "write" else
                                      "4a566e7344d15f7206377139228ea6c04eee3f3ab1307c66aa1a9bb6f8b8c7ef" if os.environ["EXERCISE_SCOPE"] in ("capture","layout") else
                                      "f95dcb568f92afb2566f8888f623022d1bf5e5e693b282eeea57ca521a21d99e" if os.environ["EXERCISE_SCOPE"] == "queue" else
                                      "e9694d1a199b47503ca4e019f6d52e6d62cf6f7d49497b8d756d3eecd464a326" if os.environ["EXERCISE_SCOPE"] == "media" else

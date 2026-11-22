@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio]
+        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains]
         default: full
 permissions:
   contents: read
@@ -159,7 +159,7 @@ jobs:
           ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
           || inputs.scope == 'media' && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || contains(fromJSON('["audio","game"]'), inputs.scope) && '[{"host":"iPhone","runtime":"18.6"}]'
-          || inputs.scope == 'movie' && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
+          || contains(fromJSON('["movie","domains"]'), inputs.scope) && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'native' && '[{"host":"iPhone","runtime":"26.2"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'phone' && '[{"host":"iPhone","runtime":"26.2"}]' || inputs.scope == 'runtime'
           && '[{"host":"iPhone","runtime":"18.5"},{"host":"iPhone","runtime":"18.6"}]'
@@ -189,11 +189,12 @@ jobs:
               raise SystemExit("构建运行与指定候选或工作流不一致")
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
-                                     "b0cb52cc5de1fea4eed5ecd96194e6d3b975c2a3282a9b89f14f071dc688e789" if os.environ["EXERCISE_SCOPE"] == "audio" else
-                                     "cd910c2e64e013a1fa82bdf36218fb9a614ee2b490c1f3aa2f0b1bb83a4352ab" if os.environ["EXERCISE_SCOPE"] == "game" else
-                                     "f20b4dee81eec0f1606bea476e29241517c05c0683a5416fc49f02579fd8f5cd" if os.environ["EXERCISE_SCOPE"] == "movie" else
+                                     "8d2d67590652a90781b2af3f3261e25b2652b0e5cf6b21e583e7eb05a9b7fe25" if os.environ["EXERCISE_SCOPE"] == "domains" else
+                                     "873b7114143ce655d57ef8fd76f480fc3d7e5fb36a5619b4d89fb9ed941b6f08" if os.environ["EXERCISE_SCOPE"] == "audio" else
+                                     "31de0001d14bf4b90a451f4182939a2ae184136391f3b4f2c3a5797f72b20c1c" if os.environ["EXERCISE_SCOPE"] == "game" else
+                                     "043039cb625eb8c271555735600434d158d4a7f43625d483c142e37cec949092" if os.environ["EXERCISE_SCOPE"] == "movie" else
                                      "17b0491b1ae11cb72b039b021635156aeeedf9d7613a269a8d1d72466ce934fe" if os.environ["EXERCISE_SCOPE"] == "record" else
-                                     "382d686435482d74246d95603830958047a85121ed5d02065fc869981f02e367" if os.environ["EXERCISE_SCOPE"] == "native" else
+                                     "4dfdb7415aa01213143cc43b9a71deca3c43866992cfa8606e6248b1343c6baf" if os.environ["EXERCISE_SCOPE"] == "native" else
                                      "66d75a378f706918a7d039cbea290abf2cfb96806d1c216cf3a1d82a36dc1707" if os.environ["EXERCISE_SCOPE"] == "review" else
                                      "2973acf106b0eb7e946de6c13e1526347ad307547b382c95db94f9af47cb61e9" if os.environ["EXERCISE_SCOPE"] == "write" else
                                      "b43f563225bb2e85463d1ee8ed2d8a8cb1f0f06596d7366cd422e783703d5f5b" if os.environ["EXERCISE_SCOPE"] in ("capture","layout") else
@@ -218,11 +219,11 @@ jobs:
           if [[ "$SIMULATOR_RUNTIME" == 26.2 ]]; then
             export DEVELOPER_DIR=/Applications/Xcode_26.2.app/Contents/Developer
             xcodebuild -version
-            if [[ "$EXERCISE_SCOPE" != native && "$EXERCISE_SCOPE" != movie ]]; then
+            if [[ "$EXERCISE_SCOPE" != native && "$EXERCISE_SCOPE" != domains && "$EXERCISE_SCOPE" != movie ]]; then
               npm install -g appium@3.1.2
               appium driver install xcuitest@11.5.0
             fi
-          elif [[ "$EXERCISE_SCOPE" != movie && "$EXERCISE_SCOPE" != game && "$EXERCISE_SCOPE" != audio ]]; then
+          elif [[ "$EXERCISE_SCOPE" != movie && "$EXERCISE_SCOPE" != game && "$EXERCISE_SCOPE" != domains && "$EXERCISE_SCOPE" != audio ]]; then
             npm install -g appium@2.19.0
             if [[ "$HOST_KIND" == macOS ]]; then
               appium driver install mac2@2.2.2

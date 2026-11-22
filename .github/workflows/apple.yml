@@ -189,11 +189,11 @@ jobs:
               raise SystemExit("构建运行与指定候选或工作流不一致")
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
-                                     "5efca862a6f91ff5c6dad4488738543149aa0c51425eb77bd728ae568d0376b0" if os.environ["EXERCISE_SCOPE"] == "audio" else
-                                     "a9d5ddb2463d1b664c187b8f38dfb17470485b1ce7f8c1c2170e2c796c8fea76" if os.environ["EXERCISE_SCOPE"] == "game" else
-                                     "67dbecea4f6be588db4dc93de489a57e7cd7ef299c3ec07bbb7c9796f62d5047" if os.environ["EXERCISE_SCOPE"] == "movie" else
+                                     "de939a9ce8e429da0c638e4bbe470343bd6954e9b815e426d3d937ab17a67c88" if os.environ["EXERCISE_SCOPE"] == "audio" else
+                                     "0a4e14bc88d2b3407be2c35e02bf69bca95695dcf206151d494a59a7ce08b69f" if os.environ["EXERCISE_SCOPE"] == "game" else
+                                     "5ffa721eb829baed26d562c96505a4ed09c64773ee17e24e38ec9892c937ad3a" if os.environ["EXERCISE_SCOPE"] == "movie" else
                                      "17b0491b1ae11cb72b039b021635156aeeedf9d7613a269a8d1d72466ce934fe" if os.environ["EXERCISE_SCOPE"] == "record" else
-                                     "142b11d16bdf61c30afe37f29808dc01dba5ab2709e2a1011f56e53bce1449c9" if os.environ["EXERCISE_SCOPE"] == "native" else
+                                     "f1c43a594a8f4715455d0beac0154126d60bd13f336b9bf52986337f8518dfa0" if os.environ["EXERCISE_SCOPE"] == "native" else
                                      "66d75a378f706918a7d039cbea290abf2cfb96806d1c216cf3a1d82a36dc1707" if os.environ["EXERCISE_SCOPE"] == "review" else
                                      "2973acf106b0eb7e946de6c13e1526347ad307547b382c95db94f9af47cb61e9" if os.environ["EXERCISE_SCOPE"] == "write" else
                                      "b43f563225bb2e85463d1ee8ed2d8a8cb1f0f06596d7366cd422e783703d5f5b" if os.environ["EXERCISE_SCOPE"] in ("capture","layout") else

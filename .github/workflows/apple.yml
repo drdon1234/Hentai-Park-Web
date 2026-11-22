@@ -190,7 +190,7 @@ jobs:
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
                                      "5efca862a6f91ff5c6dad4488738543149aa0c51425eb77bd728ae568d0376b0" if os.environ["EXERCISE_SCOPE"] == "audio" else
-                                     "5acc1ec80d5791b7994b4b4911304570adaa79aeedaf5ad2950adb2a4494d610" if os.environ["EXERCISE_SCOPE"] == "game" else
+                                     "a9d5ddb2463d1b664c187b8f38dfb17470485b1ce7f8c1c2170e2c796c8fea76" if os.environ["EXERCISE_SCOPE"] == "game" else
                                      "67dbecea4f6be588db4dc93de489a57e7cd7ef299c3ec07bbb7c9796f62d5047" if os.environ["EXERCISE_SCOPE"] == "movie" else
                                      "17b0491b1ae11cb72b039b021635156aeeedf9d7613a269a8d1d72466ce934fe" if os.environ["EXERCISE_SCOPE"] == "record" else
                                      "142b11d16bdf61c30afe37f29808dc01dba5ab2709e2a1011f56e53bce1449c9" if os.environ["EXERCISE_SCOPE"] == "native" else

@@ -439,7 +439,7 @@ enum InstalledSources {
         }
         let opened = try await session.openSiteWork(
           library, site: site, item: found, incognito: incognito)
-        if opened.media == "article", opened.contentDomain == "feed" { article = try found.articleBlocks() }
+        if opened.media == "article" { article = try found.articleBlocks() }
         work = opened
         detail = found
         if let startChapter, work?.chapters.contains(where: { $0.id == startChapter }) == true {

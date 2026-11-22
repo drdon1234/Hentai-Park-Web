@@ -21,6 +21,13 @@ pub fn public_https(url: &Url) -> bool {
         && matches!(url.host(),Some(url::Host::Domain(domain)) if domain.contains('.') && !domain.ends_with(".local") && !domain.ends_with(".localhost"))
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HostScope {
+    Declared,
+    PluginHttp,
+    PublicResource,
+}
+
 pub struct Transport {
     pub(crate) tls: Arc<ClientConfig>,
     pub(crate) proxy: Option<Url>,
@@ -136,15 +143,27 @@ impl Transport {
         timeout: Duration,
         cancel: &CancellationToken,
     ) -> Result<Response, Error> {
-        self.execute_read(session, domains, request, max_bytes, timeout, cancel, None).await
+        let scope = if session.purpose() == crate::Purpose::ExternalImage {
+            HostScope::PublicResource
+        } else {
+            HostScope::Declared
+        };
+        self.buffered(session, domains, request, max_bytes, timeout, cancel, None, scope).await
     }
-    pub async fn execute_read(
+    pub async fn execute_plugin(
         &self, session: &Session, domains: &[String], request: Request, max_bytes: usize,
         timeout: Duration, cancel: &CancellationToken, read: Option<&crate::ReadScope>,
     ) -> Result<Response, Error> {
+        if session.purpose() != crate::Purpose::Source { return Err(Error::Blocked); }
+        self.buffered(session, domains, request, max_bytes, timeout, cancel, read, HostScope::PluginHttp).await
+    }
+    async fn buffered(
+        &self, session: &Session, domains: &[String], request: Request, max_bytes: usize,
+        timeout: Duration, cancel: &CancellationToken, read: Option<&crate::ReadScope>, scope: HostScope,
+    ) -> Result<Response, Error> {
         let head = request.method == Method::HEAD;
         let mut response = self
-            .open_scoped(session, domains, request, timeout, cancel, false, read)
+            .open_scoped(session, domains, request, timeout, cancel, scope, read)
             .await?;
         let mut data = Vec::new();
         while let Some(chunk) = response.next_chunk().await? {
@@ -177,7 +196,7 @@ impl Transport {
         timeout: Duration,
         cancel: &CancellationToken,
     ) -> Result<WireResponse, Error> {
-        self.open_scoped(session, domains, request, timeout, cancel, false, None)
+        self.open_scoped(session, domains, request, timeout, cancel, HostScope::Declared, None)
             .await
     }
     pub async fn open_media(
@@ -192,7 +211,8 @@ impl Transport {
         if session.purpose() != crate::Purpose::Media {
             return Err(Error::Blocked);
         }
-        self.open_scoped(session, domains, request, timeout, cancel, session_scope, None)
+        let scope = if session_scope { HostScope::PublicResource } else { HostScope::Declared };
+        self.open_scoped(session, domains, request, timeout, cancel, scope, None)
             .await
     }
     async fn open_scoped(
@@ -202,14 +222,14 @@ impl Transport {
         request: Request,
         timeout: Duration,
         cancel: &CancellationToken,
-        session_scope: bool,
+        scope: HostScope,
         read: Option<&crate::ReadScope>,
     ) -> Result<WireResponse, Error> {
         let epoch = session.token()?;
         let deadline = tokio::time::Instant::now() + timeout;
         tokio::select! {biased;
             _=cancel.cancelled()=>Err(Error::Cancelled),_=epoch.cancelled()=>Err(Error::Cancelled),
-            result=tokio::time::timeout_at(deadline,self.transfer(session,domains,request,&epoch,cancel,deadline,session_scope,read))=>result.map_err(|_|Error::Timeout)?,
+            result=tokio::time::timeout_at(deadline,self.transfer(session,domains,request,&epoch,cancel,deadline,scope,read))=>result.map_err(|_|Error::Timeout)?,
         }
     }
     async fn transfer(
@@ -220,7 +240,7 @@ impl Transport {
         epoch: &CancellationToken,
         cancel: &CancellationToken,
         deadline: tokio::time::Instant,
-        session_scope: bool,
+        scope: HostScope,
         read: Option<&crate::ReadScope>,
     ) -> Result<WireResponse, Error> {
         let original = request.url.origin();
@@ -268,8 +288,17 @@ impl Transport {
             if matches!(session.purpose(),crate::Purpose::Media|crate::Purpose::ExternalImage) && !public_https(url) {
                 return Err(Error::Blocked);
             }
-            if !session_scope {
-                authorize(url, domains)?;
+            let declared = authorize(url, domains).is_ok();
+            let external_read = scope == HostScope::PluginHttp && !declared;
+            if external_read {
+                // 普通插件可读取公开外域资源。站点 Cookie、任意自定义凭据和连接地址不能外借。
+                if !public_https(url) || !matches!(request.method, Method::GET | Method::HEAD)
+                    || request.body.is_some() || (url.origin() == original && request.connect_address.is_some()) {
+                    return Err(Error::Blocked);
+                }
+                crate::policy::strip_cross_origin(&mut request.headers);
+            } else if scope == HostScope::Declared && !declared {
+                return Err(Error::Blocked);
             }
             let pinned = if url.origin() == original {
                 request.connect_address
@@ -291,7 +320,7 @@ impl Transport {
             headers.clone_from(&request.headers);
             let authority = &url[Position::BeforeHost..Position::AfterPort];
             headers.insert(header::HOST, authority.parse().map_err(|_| Error::Blocked)?);
-            if !headers.contains_key(header::COOKIE) {
+            if !external_read && !headers.contains_key(header::COOKIE) {
                 let value = session.header(url, epoch)?;
                 if !value.is_empty() {
                     headers.insert(header::COOKIE, value.parse().map_err(|_| Error::Blocked)?);
@@ -313,7 +342,7 @@ impl Transport {
                 .await
                 .map_err(|_| Error::Network)?;
             let status = response.status();
-            session.accept(url, response.headers(), epoch)?;
+            if !external_read { session.accept(url, response.headers(), epoch)?; }
             if request.follow_redirects && matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308) {
                 if let Some(location) = response.headers().get(header::LOCATION) {
                     let next = url

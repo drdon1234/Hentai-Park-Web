@@ -87,20 +87,24 @@ pub(crate) fn redirect(
         if body.is_some() || !matches!(*method, Method::GET | Method::HEAD) {
             return Err(Error::Blocked);
         }
-        let mut safe = HeaderMap::new();
-        for name in [
-            header::ACCEPT,
-            header::USER_AGENT,
-            header::ACCEPT_LANGUAGE,
-            header::RANGE,
-            header::CACHE_CONTROL,
-            header::PRAGMA,
-        ] {
-            for v in headers.get_all(&name) {
-                safe.append(name.clone(), v.clone());
-            }
-        }
-        *headers = safe;
+        strip_cross_origin(headers);
     }
     Ok(())
+}
+
+pub(crate) fn strip_cross_origin(headers: &mut HeaderMap) {
+    let mut safe = HeaderMap::new();
+    for name in [
+        header::ACCEPT,
+        header::USER_AGENT,
+        header::ACCEPT_LANGUAGE,
+        header::RANGE,
+        header::CACHE_CONTROL,
+        header::PRAGMA,
+    ] {
+        for v in headers.get_all(&name) {
+            safe.append(name.clone(), v.clone());
+        }
+    }
+    *headers = safe;
 }

@@ -230,9 +230,6 @@ impl RemoteImages {
                         last=Error::Unavailable;
                         continue;
                     }
-                    // 原站可返回独立图片 CDN。只把这次明确给出的主机加入无凭据图片请求的范围。
-                    let mut domains=loader.domains.clone();
-                    domains.push(url.host_str().ok_or(Error::Unavailable)?.to_owned());
                     let req = Request {
                         url,
                         method: Method::GET,
@@ -243,7 +240,7 @@ impl RemoteImages {
                     };
                     let result = io.block_on(loader.transport.execute(
                         &loader.session,
-                        &domains,
+                        &loader.domains,
                         req,
                         20 * 1024 * 1024,
                         Duration::from_secs(30),

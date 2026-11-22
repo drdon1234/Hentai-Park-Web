@@ -124,7 +124,7 @@ impl NativeHost {
         };
         let timeout =
             Duration::from_millis(args["timeout"].as_u64().unwrap_or(30_000)).min(call.remaining());
-        let response = self.io.block_on(self.transport.execute_read(
+        let response = self.io.block_on(self.transport.execute_plugin(
             &self.session,
             &self.domains,
             req,

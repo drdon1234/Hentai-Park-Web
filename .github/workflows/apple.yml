@@ -188,9 +188,9 @@ jobs:
               raise SystemExit("构建运行与指定候选或工作流不一致")
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
-                                     "5cb2b20f20801b91668a9da982607d064db3db16fe0731772e63b80a63892e97" if os.environ["EXERCISE_SCOPE"] == "movie" else
+                                     "0c94889ab6cf860cc9cb669a5ad843044f6af9032c736cd44539b14234a5f881" if os.environ["EXERCISE_SCOPE"] == "movie" else
                                      "17b0491b1ae11cb72b039b021635156aeeedf9d7613a269a8d1d72466ce934fe" if os.environ["EXERCISE_SCOPE"] == "record" else
-                                     "249faee2e8576c6582b14860d0bcc9bd916072955ea5341cbadff907f9f0ad99" if os.environ["EXERCISE_SCOPE"] == "native" else
+                                     "3bafb6c7c46bb26d0b650b74ffc7cdbb77ece530a359a150db1dc64cb4e0aa9e" if os.environ["EXERCISE_SCOPE"] == "native" else
                                      "66d75a378f706918a7d039cbea290abf2cfb96806d1c216cf3a1d82a36dc1707" if os.environ["EXERCISE_SCOPE"] == "review" else
                                      "2973acf106b0eb7e946de6c13e1526347ad307547b382c95db94f9af47cb61e9" if os.environ["EXERCISE_SCOPE"] == "write" else
                                      "b43f563225bb2e85463d1ee8ed2d8a8cb1f0f06596d7366cd422e783703d5f5b" if os.environ["EXERCISE_SCOPE"] in ("capture","layout") else

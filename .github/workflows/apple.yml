@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie]
+        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game]
         default: full
 permissions:
   contents: read
@@ -158,6 +158,7 @@ jobs:
         include: >-
           ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
           || inputs.scope == 'media' && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
+          || inputs.scope == 'game' && '[{"host":"iPhone","runtime":"18.6"}]'
           || inputs.scope == 'movie' && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'native' && '[{"host":"iPhone","runtime":"26.2"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'phone' && '[{"host":"iPhone","runtime":"26.2"}]' || inputs.scope == 'runtime'
@@ -188,9 +189,10 @@ jobs:
               raise SystemExit("构建运行与指定候选或工作流不一致")
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
-                                     "0c94889ab6cf860cc9cb669a5ad843044f6af9032c736cd44539b14234a5f881" if os.environ["EXERCISE_SCOPE"] == "movie" else
+                                     "7570bb7de479ad41d048715f8e9a32f7f0eab45aab842adeae09382e25d0c2a0" if os.environ["EXERCISE_SCOPE"] == "game" else
+                                     "120ca75912e1991427842e2603d6e5136cec51c5c77bf45d144d87ccc424ba1a" if os.environ["EXERCISE_SCOPE"] == "movie" else
                                      "17b0491b1ae11cb72b039b021635156aeeedf9d7613a269a8d1d72466ce934fe" if os.environ["EXERCISE_SCOPE"] == "record" else
-                                     "3bafb6c7c46bb26d0b650b74ffc7cdbb77ece530a359a150db1dc64cb4e0aa9e" if os.environ["EXERCISE_SCOPE"] == "native" else
+                                     "a63dcbac32078d2c8e7396920e1a6e67111fed3687b0ebd74628ea255b5ddc04" if os.environ["EXERCISE_SCOPE"] == "native" else
                                      "66d75a378f706918a7d039cbea290abf2cfb96806d1c216cf3a1d82a36dc1707" if os.environ["EXERCISE_SCOPE"] == "review" else
                                      "2973acf106b0eb7e946de6c13e1526347ad307547b382c95db94f9af47cb61e9" if os.environ["EXERCISE_SCOPE"] == "write" else
                                      "b43f563225bb2e85463d1ee8ed2d8a8cb1f0f06596d7366cd422e783703d5f5b" if os.environ["EXERCISE_SCOPE"] in ("capture","layout") else
@@ -219,7 +221,7 @@ jobs:
               npm install -g appium@3.1.2
               appium driver install xcuitest@11.5.0
             fi
-          elif [[ "$EXERCISE_SCOPE" != movie ]]; then
+          elif [[ "$EXERCISE_SCOPE" != movie && "$EXERCISE_SCOPE" != game ]]; then
             npm install -g appium@2.19.0
             if [[ "$HOST_KIND" == macOS ]]; then
               appium driver install mac2@2.2.2

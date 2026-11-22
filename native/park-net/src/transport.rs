@@ -244,12 +244,19 @@ impl Transport {
         read: Option<&crate::ReadScope>,
     ) -> Result<WireResponse, Error> {
         let original = request.url.origin();
+        if scope == HostScope::PublicResource
+            && (!matches!(request.method, Method::GET | Method::HEAD)
+                || request.body.is_some()
+                || request.connect_address.is_some())
+        {
+            return Err(Error::Blocked);
+        }
         if request.connect_address.is_some_and(|ip| {
             !ip.is_ipv4()
                 || !public_address(ip)
                 || matches!(ip,IpAddr::V4(v) if matches!(v.octets(),[198,18|19,_,_]))
         }) || request.connect_address.is_some()
-            && (request.url.scheme() != "https" || request.url.port_or_known_default() != Some(443))
+            && (!public_https(&request.url) || authorize(&request.url, domains).is_err())
         {
             return Err(Error::Blocked);
         }

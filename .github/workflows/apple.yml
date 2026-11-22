@@ -189,7 +189,7 @@ jobs:
               raise SystemExit("构建运行与指定候选或工作流不一致")
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
-                                     "8d2d67590652a90781b2af3f3261e25b2652b0e5cf6b21e583e7eb05a9b7fe25" if os.environ["EXERCISE_SCOPE"] == "domains" else
+                                     "df3ebce81f02ca8a8d5afe79fdd27f49cdc5007a9a7c91f3ad4ad979653ab0d7" if os.environ["EXERCISE_SCOPE"] == "domains" else
                                      "873b7114143ce655d57ef8fd76f480fc3d7e5fb36a5619b4d89fb9ed941b6f08" if os.environ["EXERCISE_SCOPE"] == "audio" else
                                      "31de0001d14bf4b90a451f4182939a2ae184136391f3b4f2c3a5797f72b20c1c" if os.environ["EXERCISE_SCOPE"] == "game" else
                                      "043039cb625eb8c271555735600434d158d4a7f43625d483c142e37cec949092" if os.environ["EXERCISE_SCOPE"] == "movie" else

@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record]
+        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract]
         default: full
 permissions:
   contents: read
@@ -85,6 +85,51 @@ jobs:
       - id: package
         name: 生成侧载和桌面产物
         run: bash ci/package.sh
+      - name: 复验桌面候选所用绑定与共享契约
+        if: inputs.scope == 'contract'
+        env:
+          CONTRACT_INPUT: ${{ inputs.suite }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, json, os, sqlite3
+          from pathlib import Path
+          raw = base64.b64decode(os.environ["CONTRACT_INPUT"], validate=True)
+          assert hashlib.sha256(raw).hexdigest() == "f9127ac4f28e18fb66de4f28f91e9bb09823e3c102245418a6c677e00ae222b8"
+          bundle = json.loads(raw)
+          root = Path("test/contract")
+          root.mkdir()
+          for name in ("fixture.json", "SharedProbe.swift", "lock.c"):
+              (root / name).write_text(bundle[name])
+          data = json.loads(bundle["fixture.json"])
+          (root / "expected.json").write_text(json.dumps(bundle["expected"]))
+          store = Path("/tmp/atlas/park")
+          store.mkdir(parents=True)
+          with sqlite3.connect(store / "park.db") as db:
+              db.executescript(Path("candidate/native/park-storage/src/schema.sql").read_text())
+              db.executemany("INSERT INTO works(source,id,title) VALUES(?,?,'Atlas')", [(data["source"], v) for v in data["ids"]])
+              db.execute("PRAGMA user_version=10")
+          PY
+          clang test/contract/lock.c -lsqlite3 -o /tmp/atlas-lock
+          apple=candidate/clients/apple
+          lib=("$apple"/Generated/park_ffiFFI.xcframework/macos-*/libpark_ffi.a)
+          swiftc -swift-version 5 -I "$(dirname "${lib[0]}")/Headers" "$apple"/Sources/ParkCore/*.swift test/contract/SharedProbe.swift "${lib[0]}" -framework CoreFoundation -framework Security -o test/contract/probe
+          test/contract/probe > test/contract/observed.json
+          python3 - <<'PY'
+          import hashlib, json, platform
+          from pathlib import Path
+          digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+          root = Path("test/contract")
+          observed = json.loads((root / "observed.json").read_bytes())
+          observed["input"] = digest(root / "fixture.json")
+          expected = json.loads((root / "expected.json").read_bytes())
+          assert {k: observed[k] for k in expected} == expected
+          apple = Path("candidate/clients/apple")
+          observed.update(appleLibrary=digest(next(apple.glob("Generated/*.xcframework/macos-*/libpark_ffi.a"))),
+                          binding=digest(apple / "Sources/ParkCore/park_ffi.swift"), os=platform.mac_ver()[0],
+                          package=digest(Path("test/packages/HentaiPark-macOS-adhoc.zip")))
+          Path("test/evidence/contract.json").write_text(json.dumps(observed, indent=2))
+          PY
       - name: 启动 macOS 客户端
         run: bash ci/macos.sh
       - name: 依次启动 iPhone 和 iPad 客户端

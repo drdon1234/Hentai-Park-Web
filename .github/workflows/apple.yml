@@ -190,7 +190,7 @@ jobs:
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
                                      "e69ce1c18bd4ee6317e3600a10cd5309a054326a315848540d2e263cd97d1f24" if os.environ["EXERCISE_SCOPE"] == "tavern" else
-                                     "0b181cff39b8ab1e145efc2e160afba0e2e9914e3bcf727ba5bee0032a0a7985" if os.environ["EXERCISE_SCOPE"] == "pictures" else
+                                     "a2f728eca019795bcc11daecb1b580dea6cf59aa1e156ba224133910e44c0d4e" if os.environ["EXERCISE_SCOPE"] == "pictures" else
                                      "35eab0623a65d9ad9ac6c330d44e449b257564bcbba87f6aa1e5dcf125a43299" if os.environ["EXERCISE_SCOPE"] == "reading" else
                                      "35eab0623a65d9ad9ac6c330d44e449b257564bcbba87f6aa1e5dcf125a43299" if os.environ["EXERCISE_SCOPE"] == "domains" else
                                      "873b7114143ce655d57ef8fd76f480fc3d7e5fb36a5619b4d89fb9ed941b6f08" if os.environ["EXERCISE_SCOPE"] == "audio" else
@@ -201,7 +201,7 @@ jobs:
                                      "66d75a378f706918a7d039cbea290abf2cfb96806d1c216cf3a1d82a36dc1707" if os.environ["EXERCISE_SCOPE"] == "review" else
                                      "2973acf106b0eb7e946de6c13e1526347ad307547b382c95db94f9af47cb61e9" if os.environ["EXERCISE_SCOPE"] == "write" else
                                      "b43f563225bb2e85463d1ee8ed2d8a8cb1f0f06596d7366cd422e783703d5f5b" if os.environ["EXERCISE_SCOPE"] in ("capture","layout") else
-                                     "dac80362c68dd040329502cc7b6aca0c1709220de7298f4bf0acb7bb89eae511" if os.environ["EXERCISE_SCOPE"] == "queue" else
+                                     "7307a73c23ecb0ebe5c77793de7c8437704f1b1a2bd36e2c09baccc92ff8e9ea" if os.environ["EXERCISE_SCOPE"] == "queue" else
                                      "7262ea068ca24171c4784704930ae5ead01a83f2290dd2f3d5766afde2e4c249" if os.environ["EXERCISE_SCOPE"] == "media" else
                                      "5a21d497ee7b4e701f05448dd357fdde5d4a79ad97c4bf14b12fff0cf8b109b9"):
               raise SystemExit("验收文件摘要与工作流核定值不一致")

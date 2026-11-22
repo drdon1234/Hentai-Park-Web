@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract]
+        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie]
         default: full
 permissions:
   contents: read
@@ -158,6 +158,7 @@ jobs:
         include: >-
           ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
           || inputs.scope == 'media' && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
+          || inputs.scope == 'movie' && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'native' && '[{"host":"iPhone","runtime":"26.2"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'phone' && '[{"host":"iPhone","runtime":"26.2"}]' || inputs.scope == 'runtime'
           && '[{"host":"iPhone","runtime":"18.5"},{"host":"iPhone","runtime":"18.6"}]'
@@ -187,8 +188,9 @@ jobs:
               raise SystemExit("构建运行与指定候选或工作流不一致")
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
+                                     "5cb2b20f20801b91668a9da982607d064db3db16fe0731772e63b80a63892e97" if os.environ["EXERCISE_SCOPE"] == "movie" else
                                      "17b0491b1ae11cb72b039b021635156aeeedf9d7613a269a8d1d72466ce934fe" if os.environ["EXERCISE_SCOPE"] == "record" else
-                                     "0b45b09bb0824a0c40f5391625b0887af0a75a5903208c0d9de19ac94a724b2b" if os.environ["EXERCISE_SCOPE"] == "native" else
+                                     "249faee2e8576c6582b14860d0bcc9bd916072955ea5341cbadff907f9f0ad99" if os.environ["EXERCISE_SCOPE"] == "native" else
                                      "66d75a378f706918a7d039cbea290abf2cfb96806d1c216cf3a1d82a36dc1707" if os.environ["EXERCISE_SCOPE"] == "review" else
                                      "2973acf106b0eb7e946de6c13e1526347ad307547b382c95db94f9af47cb61e9" if os.environ["EXERCISE_SCOPE"] == "write" else
                                      "b43f563225bb2e85463d1ee8ed2d8a8cb1f0f06596d7366cd422e783703d5f5b" if os.environ["EXERCISE_SCOPE"] in ("capture","layout") else
@@ -213,11 +215,11 @@ jobs:
           if [[ "$SIMULATOR_RUNTIME" == 26.2 ]]; then
             export DEVELOPER_DIR=/Applications/Xcode_26.2.app/Contents/Developer
             xcodebuild -version
-            if [[ "$EXERCISE_SCOPE" != native ]]; then
+            if [[ "$EXERCISE_SCOPE" != native && "$EXERCISE_SCOPE" != movie ]]; then
               npm install -g appium@3.1.2
               appium driver install xcuitest@11.5.0
             fi
-          else
+          elif [[ "$EXERCISE_SCOPE" != movie ]]; then
             npm install -g appium@2.19.0
             if [[ "$HOST_KIND" == macOS ]]; then
               appium driver install mac2@2.2.2
@@ -227,7 +229,7 @@ jobs:
           fi
           python -m venv test/venv
           test/venv/bin/python -m pip install --disable-pip-version-check Pillow==11.3.0
-          if [[ "$EXERCISE_SCOPE" == media || "$EXERCISE_SCOPE" == record ]]; then
+          if [[ "$EXERCISE_SCOPE" == media || "$EXERCISE_SCOPE" == record || "$EXERCISE_SCOPE" == movie ]]; then
             test/venv/bin/python -m pip install --disable-pip-version-check imageio-ffmpeg==0.6.0
           fi
           if [[ "$EXERCISE_SCOPE" == record ]]; then

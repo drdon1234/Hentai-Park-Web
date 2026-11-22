@@ -367,6 +367,10 @@ enum InstalledSources {
                 blocks: article, tr: tr, select: { selectedBlock = $0 })
             }
             if let work {
+              if work.media == "tavern" {
+                TavernResourceActions(session: session, library: library, site: site.key, item: detail, tr: tr)
+                  .id(work.libraryID)
+              }
               if work.contentDomain == "live", work.media == "video", site.nativeVideo {
                 if recorder.contains(work.libraryID) {
                   Button(tr("停止录制")) { recorder.stop(work.libraryID) }

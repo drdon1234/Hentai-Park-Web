@@ -457,7 +457,7 @@ extension ProgressSession {
     let keys: Set<String> = [
       "cover", "coverImages", "coverAspect", "coverBlurred", "uploaded", "tags", "authors",
       "subtitle", "mediaKind", "contentDomain", "singleChapterId", "voiceNodeType", "workCode",
-      "editions",
+      "editions", "tavernKind",
     ]
     for key in keys where fields[key] == nil || fields[key] is NSNull || fields[key] as? String == "" {
       fields[key] = prior[key]
@@ -470,6 +470,37 @@ extension ProgressSession {
     work.summary = try JSONSerialization.data(
       withJSONObject: fields.filter { keys.contains($0.key) && !($0.value is NSNull) })
     return work
+  }
+
+  public func siteTavernResource(_ library: SourceLibrary, site: String, item: SiteWork)
+    async throws -> SourceTavernResource?
+  {
+    let root = directory
+    return try await run { store, request in
+      let service = try library.service(directory: root, request: request)
+      let manifest = try service.sourceManifest(source: site, request: request)
+      guard let fields = try JSONSerialization.jsonObject(with: Data(manifest.utf8)) as? [String: Any],
+        let capabilities = fields["capabilities"] as? [String: Any]
+      else { throw SiteReadError.malformed }
+      guard fields["type"] as? String == "tavern", capabilities["tavernAsset"] as? Bool == true
+      else { return nil }
+      var summary = try item.summary.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+      summary["title"] = item.title
+      let bytes = try JSONSerialization.data(withJSONObject: summary)
+      return try service.tavernResource(store: store, source: site, work: item.id,
+        summary: String(decoding: bytes, as: UTF8.self), request: request)
+    }
+  }
+
+  public func saveTavernResource(_ resource: SourceTavernResource) async throws {
+    _ = try await run { store, _ in try resource.save(store: store) }
+  }
+
+  public func originalTavernBytes(_ resource: SourceTavernResource) async throws -> Data {
+    try await run { _, _ in
+      let file = try resource.originalFile(directory: FileManager.default.temporaryDirectory.path)
+      return try withExtendedLifetime(file) { try Data(contentsOf: URL(fileURLWithPath: file.path())) }
+    }
   }
 
   public func siteImage(_ library: SourceLibrary, site: String, address: String) async throws

@@ -95,6 +95,10 @@ pub(crate) fn asset(dir: &Path, relative: &str) -> Result<PathBuf, StorageError>
 
 #[uniffi::export]
 impl ProgressStore {
+    pub fn last_read_chapter(&self, source: String, work: String) -> Result<Option<String>, StorageError> {
+        Ok(self.lock()?.query_row("SELECT chapter_id FROM history WHERE source=? AND work_id=?",
+            params![source, work],|row|row.get::<_,Option<String>>(0)).optional()?.flatten())
+    }
     pub fn stored_work(&self, source: String, work: String) -> Result<Option<String>, StorageError> {
         Ok(self.lock()?.query_row("SELECT json FROM works WHERE source=? AND id=?",params![source,work],|r|r.get(0)).optional()?)
     }

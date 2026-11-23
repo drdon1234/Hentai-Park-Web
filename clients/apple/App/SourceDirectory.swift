@@ -298,6 +298,10 @@ enum InstalledSources {
   @State private var detail: SiteWork?
   @State private var work: LibraryWork?
   @State private var chapter: ChapterKey?
+  @State private var resumedChapter: String?
+  @State private var progressReady = false
+  @State private var progressFailed = false
+  @State private var progressAttempt = 0
   @State private var article: [SiteArticleBlock] = []
   @State private var selectedBlock: Int?
   @State private var playingGame = false
@@ -367,6 +371,23 @@ enum InstalledSources {
                 blocks: article, tr: tr, select: { selectedBlock = $0 })
             }
             if let work {
+              if let first = work.chapters.first {
+                let resume = work.chapters.first { $0.id == resumedChapter }
+                Button(tr(work.media == "video" ? "播放" : resume == nil ? "开始阅读" : "继续阅读")) {
+                  chapter = ChapterKey(source: site.key, workId: work.workId, chapterId: (resume ?? first).id)
+                }.disabled(!progressReady)
+                .task(id: progressAttempt) {
+                  progressReady = false
+                  progressFailed = false
+                  do {
+                    let saved = try await session.lastReadChapter(source: site.key, work: work.workId)
+                    try Task.checkCancellation()
+                    resumedChapter = saved
+                    progressReady = true
+                  } catch { if !Task.isCancelled { progressFailed = true } }
+                }
+                if progressFailed { Button(tr("重试")) { progressAttempt += 1 } }
+              }
               if work.media == "tavern" {
                 TavernResourceActions(session: session, library: library, site: site.key, item: detail, tr: tr)
                   .id(work.libraryID)

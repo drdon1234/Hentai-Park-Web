@@ -279,7 +279,7 @@ extension ProgressSession {
         chapters = (item.chapters ?? []).filter { !$0.id.isEmpty }.map {
           OfflineChapter(id: $0.id, title: $0.title ?? item.title)
         }
-        if chapters.isEmpty {
+        if chapters.isEmpty && (item.chapters == nil || media == "video") {
           chapters = [
             OfflineChapter(
               id: item.singleChapterId.flatMap { $0.isEmpty ? nil : $0 } ?? "_", title: item.title)
@@ -309,6 +309,9 @@ extension ProgressSession {
         historyMs: nil, historyChapter: nil, historyPage: 0, chapters: chapters,
         contentDomain: domain)
     }
+  }
+  public func lastReadChapter(source: String, work: String) async throws -> String? {
+    try await run { store, _ in try store.lastReadChapter(source: source, work: work) }
   }
   public func sites(_ library: SourceLibrary) async throws -> [InstalledSite] {
     try await installedSites(library).filter {

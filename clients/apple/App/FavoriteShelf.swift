@@ -114,6 +114,26 @@ private extension View {
     }
 }
 
+@MainActor private struct ShelfMigrationBatch: View {
+    let works: [LibraryWork]
+    let session: ProgressSession
+    let incognito: Bool
+    let tr: (String) -> String
+    let cancel: () -> Void
+    let completed: (String, Bool) -> Void
+    @State private var index = 0
+
+    var body: some View {
+        let work = works[index]
+        ShelfMigration(work: work, session: session, incognito: incognito, tr: tr,
+            cancel: cancel, completed: { message in
+                let finished = index + 1 == works.count
+                if !finished { index += 1 }
+                completed(message, finished)
+            }).id(work.libraryID)
+    }
+}
+
 @MainActor final class ShelfOptions: ObservableObject {
     @Published var term = ""
     @Published var category = ""
@@ -262,9 +282,16 @@ private extension View {
 }
 
 @MainActor struct ShelfControls: View {
-    private enum Panel: String, Identifiable {
-        case filters, categories, migration
-        var id: String { rawValue }
+    private enum Panel: Identifiable {
+        case filters, categories
+        case migration([LibraryWork])
+        var id: String {
+            switch self {
+            case .filters: return "filters"
+            case .categories: return "categories"
+            case .migration: return "migration"
+            }
+        }
     }
     @ObservedObject var options: ShelfOptions
     let session: ProgressSession
@@ -281,7 +308,6 @@ private extension View {
     @State private var working = false
     @State private var failed = false
     @State private var name = ""
-    @State private var migration: [LibraryWork] = []
     @State private var outcome = ""
 
     private var targets: [LibraryWork] { visible.filter { options.selected.contains($0.libraryID) } }
@@ -293,7 +319,10 @@ private extension View {
             if options.selecting {
                 action("取消选择") { options.finishSelection() }
                 action("分类") { name = ""; panel = .categories }.disabled(targets.isEmpty)
-                action("迁移到其他站点") { migration = targets; panel = .migration }.disabled(targets.isEmpty)
+                action("迁移到其他站点") {
+                    let selection = targets
+                    if !selection.isEmpty { panel = .migration(selection) }
+                }.disabled(targets.isEmpty)
                 action("标为已读") { apply(.markRead) }.disabled(targets.isEmpty)
                 action("取消收藏") { removing = true }.disabled(targets.isEmpty)
             } else {
@@ -307,20 +336,17 @@ private extension View {
             if !outcome.isEmpty { Text(outcome) }
         }
         .disabled(working)
-        .sheet(item: $panel, onDismiss: { migration = [] }) { sheet in
+        .sheet(item: $panel) { sheet in
             switch sheet {
             case .filters: filterPanel
             case .categories: categoryPanel
-            case .migration:
-                if let work = migration.first {
-                    ShelfMigration(work: work, session: session, incognito: incognito, tr: tr,
-                        cancel: { panel = nil }, completed: { message in
-                            outcome = message
-                            migration.removeFirst()
-                            if migration.isEmpty { options.finishSelection(); panel = nil }
-                            refresh()
-                        }).id(work.libraryID)
-                }
+            case .migration(let works):
+                ShelfMigrationBatch(works: works, session: session, incognito: incognito, tr: tr,
+                    cancel: { panel = nil }, completed: { message, finished in
+                        outcome = message
+                        if finished { options.finishSelection(); panel = nil }
+                        refresh()
+                    })
             }
         }
         .alert(tr("取消收藏 {value0} 部作品？").replacingOccurrences(of: "{value0}", with: String(targets.count)),

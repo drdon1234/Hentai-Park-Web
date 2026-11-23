@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-shelf, mac-setup, migration, download-actions, discovery-scope, full-history, download-entry, shelf-display, detail-sections, storage, domain-recheck]
+        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-domains, mac-shelf, mac-setup, migration, download-actions, discovery-scope, full-history, download-entry, shelf-display, detail-sections, storage, domain-recheck]
         default: full
 permissions:
   contents: read
@@ -156,7 +156,7 @@ jobs:
       fail-fast: false
       matrix:
         include: >-
-          ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record","mac-shelf","mac-setup"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
+          ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record","mac-domains","mac-shelf","mac-setup"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
           || contains(fromJSON('["media","download-actions","discovery-scope","migration","full-history","download-entry","shelf-display","detail-sections","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'audio' && '[{"host":"iPhone","runtime":"18.6"}]'
           || inputs.scope == 'domain-recheck' && '[{"host":"iPhone","runtime":"18.6"}]'
@@ -202,6 +202,7 @@ jobs:
                                      "a36fd8f574664d8c1f59cef6ee8690989d12aaf98ee2b3154d3cb615251b4bee" if os.environ["EXERCISE_SCOPE"] == "collection" else
                                      "59ed9cfc798d61a81f577a339a1ab9039b387c8735206f867f872d511b45a2d0" if os.environ["EXERCISE_SCOPE"] == "migration" else
                                      "a9a8e96be0096f2663d09859534f85c95f0cb2a0492bcd7bdb4240d5f628c5bf" if os.environ["EXERCISE_SCOPE"] == "mac-shelf" else
+                                     "2eb697ae63f929dd1d6687b4684586a7057b4e2925351774990432dc6d6ab5f2" if os.environ["EXERCISE_SCOPE"] == "mac-domains" else
                                      "b484cedcd8968456373b0f1fa3b58dc36f4b662f21839fecf9eeb0416c833161" if os.environ["EXERCISE_SCOPE"] == "mac-setup" else
                                      "29c666e8563a003adeefff2d3eaefd41b9266257fbce98a0ee7fe015744f9ce6" if os.environ["EXERCISE_SCOPE"] == "tavern" else
                                      "20f343939ddfb2059babd083cd3ce5de23f2df26c501a48ddf67260c16f808dc" if os.environ["EXERCISE_SCOPE"] == "pictures" else

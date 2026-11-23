@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-shelf, mac-setup, migration, download-actions, discovery-scope, storage, domain-recheck]
+        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-shelf, mac-setup, migration, download-actions, discovery-scope, detail-sections, storage, domain-recheck]
         default: full
 permissions:
   contents: read
@@ -157,7 +157,7 @@ jobs:
       matrix:
         include: >-
           ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record","mac-shelf","mac-setup"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
-          || contains(fromJSON('["media","download-actions","discovery-scope","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
+          || contains(fromJSON('["media","download-actions","discovery-scope","detail-sections","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'audio' && '[{"host":"iPhone","runtime":"18.6"}]'
           || inputs.scope == 'domain-recheck' && '[{"host":"iPhone","runtime":"18.6"}]'
           || contains(fromJSON('["movie","domains","reading","pictures","tavern","setup","shelf","collection","migration","game"]'), inputs.scope) && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
@@ -191,12 +191,13 @@ jobs:
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
                                      "ae6eaa7c454f76b0e691d15c6b139011d6da35e30bff134ccae766f2a7ff6e89" if os.environ["EXERCISE_SCOPE"] == "storage" else
+                                     "59710511b649e6358f19f17fd73dd31c93abf7d930a05b37702ffd1664e68b98" if os.environ["EXERCISE_SCOPE"] == "detail-sections" else
                                      "4e714b711fbfa85e5d6214346da6626f9693c65eac2c07740d4415e962a9926f" if os.environ["EXERCISE_SCOPE"] == "discovery-scope" else
                                      "d2985cbdd16215a8676ee6cea65cbc02cc178ebd3ecfa488d2e4ee4fe4430df5" if os.environ["EXERCISE_SCOPE"] == "download-actions" else
                                      "30785acdc161f1d9f3c3181827e7e1685e9ec7b182de155c0ebfa9c78540be2b" if os.environ["EXERCISE_SCOPE"] == "setup" else
-                                     "eafdfd2cd133ef771b61d80e37d6ede7a94b58ed23628d41c55d8e6aebdbdd89" if os.environ["EXERCISE_SCOPE"] == "shelf" else
-                                     "4080415f62795b962d19c13fb740caab504f133a767ffa2132fd9512eb02b5a4" if os.environ["EXERCISE_SCOPE"] == "collection" else
-                                     "0dad521b729e1ecd0aac402b81b40a8eb464aa23678fdd4c0885d023ed023d4d" if os.environ["EXERCISE_SCOPE"] == "migration" else
+                                     "e8b98734706140939a2157137a73df73e00e69617f54602885bf2fb9b0be1d4a" if os.environ["EXERCISE_SCOPE"] == "shelf" else
+                                     "a36fd8f574664d8c1f59cef6ee8690989d12aaf98ee2b3154d3cb615251b4bee" if os.environ["EXERCISE_SCOPE"] == "collection" else
+                                     "a538a3cb2bb9b777d1d9185d9f49f1f9534b16e25abab2165d9f62ed2a1484ae" if os.environ["EXERCISE_SCOPE"] == "migration" else
                                      "5315030babb990631fe2afb75bbb7c8d045a0ca5cb2db4a9f690ea40bd5379bf" if os.environ["EXERCISE_SCOPE"] == "mac-shelf" else
                                      "0047cf24a554b81a84f574336dfae7d5f3fffd066ba483ac43032cc95e29c354" if os.environ["EXERCISE_SCOPE"] == "mac-setup" else
                                      "29c666e8563a003adeefff2d3eaefd41b9266257fbce98a0ee7fe015744f9ce6" if os.environ["EXERCISE_SCOPE"] == "tavern" else

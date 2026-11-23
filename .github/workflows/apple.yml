@@ -194,7 +194,7 @@ jobs:
                                      "d3b66cf8e6771f6d1117bb2ca8d4204d0f12c53c8a053d80a5a324d7a01e73f5" if os.environ["EXERCISE_SCOPE"] == "full-history" else
                                      "9dc137fa6f259cfb761d812a63cbd7e0c9927f23fb75cc4183e3192b06422407" if os.environ["EXERCISE_SCOPE"] == "download-entry" else
                                      "cb12c586ee3213b7cf2a80ec5a066a6b437013f558eb145b2f263808a0d3df36" if os.environ["EXERCISE_SCOPE"] == "shelf-display" else
-                                     "5b385c5fad0bdb55b36fa7d9ee0fb240d672e7b2e4ceb1f135161aee20bd5dd4" if os.environ["EXERCISE_SCOPE"] == "host-preview-mac" else
+                                     "27b7b2223667ba3a20dec8da25c4e8ae3680f50df38eab26644d5a1f4d4da07e" if os.environ["EXERCISE_SCOPE"] == "host-preview-mac" else
                                      "ffe771be9e821a3e6e75d960d54f1c9fa81d5a5dd5c57064aa926d649f4f1128" if os.environ["EXERCISE_SCOPE"] == "host-preview" else
                                      "9b2fb87f5a5b1520462dba32b73f020d79843bb3922658639fb206942478f2f8" if os.environ["EXERCISE_SCOPE"] == "host-tags" else
                                      "fa50f9d3dfb7a9dafbda5c01781e87b72b0e528cc9ea2537266b595ad8a7ab97" if os.environ["EXERCISE_SCOPE"] == "host-directory" else

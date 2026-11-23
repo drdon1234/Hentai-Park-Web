@@ -190,7 +190,7 @@ jobs:
               raise SystemExit("构建运行与指定候选或工作流不一致")
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
-                                     "eec73b7d59fab2dedd01ec44112a2eb814803ba796e2f675538c24ee7f141ead" if os.environ["EXERCISE_SCOPE"] == "setup" else
+                                     "0e3abcefbcd1b06bc5a368998d30132d5028a20a61e6b603a71326fbc0dae678" if os.environ["EXERCISE_SCOPE"] == "setup" else
                                      "7f0d52379b9aa96e98d086fa7a4b3849062054942c402c2325f06bc2318eb1a4" if os.environ["EXERCISE_SCOPE"] == "tavern" else
                                      "7f744f4f7caa1737e01b8192c0394df5d1ece958cfeb260f5353af3b3898819e" if os.environ["EXERCISE_SCOPE"] == "pictures" else
                                      "dc18e8f9e0e19857bfa28639ac237a2d13e0a6030c4dfffdef460f115f3e6709" if os.environ["EXERCISE_SCOPE"] == "reading" else

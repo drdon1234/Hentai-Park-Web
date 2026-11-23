@@ -190,11 +190,16 @@ private extension View {
             ForEach(works, id: \.libraryID) { work in
                 let info = options.stats[work.source + ":" + work.workId]
                 let selected = options.selected.contains(work.libraryID)
+                let localOnly = work.source == "local" || work.media == "bundle"
+                let canOpenLocal = work.downloaded && !work.invalidDownload && !work.chapters.isEmpty
                 VStack(alignment: .leading, spacing: 4) {
                     Button {
-                        if !options.selecting { details(work) }
-                        else if selected { options.selected.remove(work.libraryID) }
-                        else { options.selected.insert(work.libraryID) }
+                        if options.selecting {
+                            if selected { options.selected.remove(work.libraryID) }
+                            else { options.selected.insert(work.libraryID) }
+                        } else if localOnly {
+                            expanded = expanded == work.libraryID ? nil : work.libraryID
+                        } else { details(work) }
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             if let cover = info?.cover, !cover.isEmpty {
@@ -206,15 +211,18 @@ private extension View {
                         }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                     }.buttonStyle(.borderless).accessibilityLabel(Text(work.title))
                         .accessibilityAddTraits(selected ? [.isSelected] : [])
+                        .disabled(!options.selecting && localOnly && !canOpenLocal)
                     if options.display.badgeSource { Text(work.source).font(.caption) }
                     if options.display.badgeUnread, let info, !info.oneShot, info.unread > 0 {
                         Text(tr("未读") + " " + String(info.unread)).font(.caption)
                     }
                     if options.display.badgeDownloaded, info?.downloaded == true { Text(tr("已下载")).font(.caption) }
-                    if !options.selecting, work.downloaded, !work.invalidDownload, !work.chapters.isEmpty {
-                        Button(tr(expanded == work.libraryID ? "收起" : "下载的章节")) {
-                            expanded = expanded == work.libraryID ? nil : work.libraryID
-                        }.buttonStyle(.borderless)
+                    if !options.selecting, canOpenLocal {
+                        if !localOnly {
+                            Button(tr(expanded == work.libraryID ? "收起" : "下载的章节")) {
+                                expanded = expanded == work.libraryID ? nil : work.libraryID
+                            }.buttonStyle(.borderless)
+                        }
                         if expanded == work.libraryID {
                             ForEach(work.chapters, id: \.id) { chapter in
                                 Button(chapter.title) { open(work, chapter.id) }.buttonStyle(.borderless)
@@ -267,7 +275,8 @@ private extension View {
     let refresh: () -> Void
     @State private var panel: Panel?
     @State private var draft = ShelfPreferences()
-    @State private var searchDraft = "", categoryDraft = ""
+    @State private var searchDraft = ""
+    @State private var categoryDraft = ""
     @State private var removing = false
     @State private var working = false
     @State private var failed = false

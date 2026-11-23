@@ -192,7 +192,7 @@ jobs:
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
                                      "c80d74f57460570d3767717a321b3f506531ad68013a2db66450843ec8bf5be3" if os.environ["EXERCISE_SCOPE"] == "storage" else
                                      "267d0a13847b723628d5bc1eace8edb3a12960e82ee5125e64d83e16661f9626" if os.environ["EXERCISE_SCOPE"] == "discovery-scope" else
-                                     "88fa932de673381841282cf226642b440a7850b1cd45a9e22d693301ba8bdc79" if os.environ["EXERCISE_SCOPE"] == "download-actions" else
+                                     "d2985cbdd16215a8676ee6cea65cbc02cc178ebd3ecfa488d2e4ee4fe4430df5" if os.environ["EXERCISE_SCOPE"] == "download-actions" else
                                      "30785acdc161f1d9f3c3181827e7e1685e9ec7b182de155c0ebfa9c78540be2b" if os.environ["EXERCISE_SCOPE"] == "setup" else
                                      "eafdfd2cd133ef771b61d80e37d6ede7a94b58ed23628d41c55d8e6aebdbdd89" if os.environ["EXERCISE_SCOPE"] == "shelf" else
                                      "4080415f62795b962d19c13fb740caab504f133a767ffa2132fd9512eb02b5a4" if os.environ["EXERCISE_SCOPE"] == "collection" else

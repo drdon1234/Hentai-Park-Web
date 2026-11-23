@@ -26,6 +26,7 @@ import SwiftUI
   @State private var deletingEvent: SubscriptionUpdates.Event?
   @State private var clearingEvents = false
   @State private var pageStarts: [SubscriptionUpdates.Event] = []
+  @State private var displayedPage: String?
   @State private var retry = 0
   @State private var operation: Task<Void, Never>?
   @State private var status: String?
@@ -45,7 +46,27 @@ import SwiftUI
           HStack {
             Button(tr("返回"), action: back)
             Text(tr("订阅更新")).font(.headline)
+            Spacer()
+            if let data, !data.events.isEmpty {
+              Menu(tr("管理")) {
+                Button(tr("全部标为已读")) { run { try await session.readAllSubscriptionEvents() } }
+                Button(tr("清空订阅更新"), role: .destructive) { clearingEvents = true }
+              }
+              .accessibilityLabel(tr("管理") + " · " + tr("订阅更新"))
+              .disabled(operation != nil)
+            }
           }.padding(.horizontal)
+          if let data, !pageStarts.isEmpty || data.events.count > 100 {
+            HStack {
+              if !pageStarts.isEmpty {
+                Button(tr("上一页")) { run(page: Array(pageStarts.dropLast())) {} }
+              }
+              Spacer()
+              if data.events.count > 100 {
+                Button(tr("下一页")) { run(page: pageStarts + [data.events[99]]) {} }
+              }
+            }.disabled(operation != nil).padding(.horizontal)
+          }
           List {
             if let status { Text(tr(status)) }
             if let data {
@@ -95,12 +116,6 @@ import SwiftUI
                 }
               }
               if data.events.isEmpty { Text(tr("暂无订阅更新")) }
-              if !data.events.isEmpty {
-                Menu(tr("管理")) {
-                  Button(tr("全部标为已读")) { run { try await session.readAllSubscriptionEvents() } }
-                  Button(tr("清空订阅更新"), role: .destructive) { clearingEvents = true }
-                }.disabled(operation != nil)
-              }
               ForEach(Array(data.events.prefix(100))) { event in
                 HStack {
                 Button {
@@ -119,16 +134,6 @@ import SwiftUI
                 }.accessibilityLabel(tr("删除订阅更新") + " " + event.title)
                  .buttonStyle(.borderless).disabled(operation != nil)
                 }
-              }
-              if !pageStarts.isEmpty || data.events.count > 100 {
-                HStack {
-                  if !pageStarts.isEmpty {
-                    Button(tr("上一页")) { run { _ = pageStarts.popLast() } }
-                  }
-                  if data.events.count > 100 {
-                    Button(tr("下一页")) { run { pageStarts.append(data.events[99]) } }
-                  }
-                }.buttonStyle(.borderless).disabled(operation != nil)
               }
               Section(header: Text(tr("订阅状态"))) {
                 Button(tr("添加订阅")) { editor = SubscriptionDraft(original: nil) }
@@ -157,7 +162,7 @@ import SwiftUI
             } else if status != nil {
               Button(tr("重试")) { retry += 1 }
             } else { ProgressView() }
-          }
+          }.id(displayedPage)
         }
       }
     }.task(id: retry) {
@@ -236,14 +241,19 @@ import SwiftUI
     }
   }
 
-  private func run(_ action: @escaping @MainActor () async throws -> Void) {
+  private func run(page: [SubscriptionUpdates.Event]? = nil, _ action: @escaping @MainActor () async throws -> Void) {
     guard operation == nil else { return }
     status = nil
     operation = Task {
       defer { operation = nil }
       do {
         try await action()
-        data = try await session.subscriptionUpdates(after: pageStarts.last)
+        let next = page ?? pageStarts
+        let updates = try await session.subscriptionUpdates(after: next.last)
+        try Task.checkCancellation()
+        data = updates
+        pageStarts = next
+        displayedPage = next.last?.key
       } catch { if !Task.isCancelled { status = "加载失败" } }
     }
   }

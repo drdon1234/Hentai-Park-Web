@@ -199,7 +199,7 @@ jobs:
                                      "ffe771be9e821a3e6e75d960d54f1c9fa81d5a5dd5c57064aa926d649f4f1128" if os.environ["EXERCISE_SCOPE"] == "host-preview" else
                                      "4f1ba6fa87736f5d3f04f6b2b69ad6016713d5acaec1e6795060908f1eae2c03" if os.environ["EXERCISE_SCOPE"] == "host-tags" else
                                      "fa50f9d3dfb7a9dafbda5c01781e87b72b0e528cc9ea2537266b595ad8a7ab97" if os.environ["EXERCISE_SCOPE"] == "host-directory" else
-                                     "0811bbf5f9a976cac3ed4251ab5515885567a665b068fe5c84128e75f6ec584a" if os.environ["EXERCISE_SCOPE"] == "host-favorites" else
+                                     "70b3b3473947450a96a533fbf7ff621ca2152cd56f31784fe865fa21a0040b00" if os.environ["EXERCISE_SCOPE"] == "host-favorites" else
                                      "5eefb4f4470a4af95acad553b145bb43a8e9384bfd6e2df3cc23f1e043694a72" if os.environ["EXERCISE_SCOPE"] == "host-metadata" else
                                      "d6308468e3dbe604f9c0d9cfcf94ea375619cd0a9a968aae9e5023a89dec4d61" if os.environ["EXERCISE_SCOPE"] == "host-actions" else
                                      "fdaf167c7839870c77b0c2efcb178adf5eef6ff3d3c0831c35c015a33f7b05d3" if os.environ["EXERCISE_SCOPE"] == "detail-sections" else

@@ -1,6 +1,5 @@
 use crate::{Capabilities, Error, Invocation, SourceState};
 use base64::prelude::{Engine, BASE64_STANDARD};
-use md5::{Digest, Md5};
 use http::{HeaderMap, HeaderName, HeaderValue, Method};
 use park_net::{Purpose, Request, Session, Sessions, Transport};
 use serde_json::{json, Value};
@@ -186,23 +185,11 @@ impl Capabilities for NativeHost {
                 &args,
                 &call.cancelled,
             ))?),
-            "crypto" if args["op"] == "md5Hex" => {
-                let digest = |text: &Value| {
-                    let input = text.as_str().ok_or(Error::Config)?;
-                    Ok(Value::String(format!("{:x}", Md5::digest(input.as_bytes()))))
-                };
-                match &args["args"]["text"] {
-                    Value::Array(texts) => {
-                        let mut hashes = Vec::with_capacity(texts.len());
-                        for text in texts {
-                            call.check()?;
-                            hashes.push(digest(text)?);
-                        }
-                        Ok(Value::Array(hashes))
-                    }
-                    value => digest(value),
-                }
-            }
+            "crypto" => crate::crypto::run(
+                args["op"].as_str().ok_or(Error::Config)?,
+                &args["args"],
+                call,
+            ),
             "persist" => {
                 self.state
                     .borrow_mut()

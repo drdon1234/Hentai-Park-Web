@@ -1,4 +1,5 @@
 mod catalog;
+mod crypto;
 mod engine;
 pub use catalog::{installed_manifest, release, Installed, PluginPreview, SourceCatalog};
 mod native_host;

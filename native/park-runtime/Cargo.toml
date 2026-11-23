@@ -8,6 +8,11 @@ publish = false
 serde = { version="1",features=["derive"] }
 sha2 = "0.10"
 md-5 = "0.10"
+aes = "0.8"
+aes-gcm = "0.10"
+hex = "0.4"
+hmac = "0.12"
+sha1 = "0.10"
 park-net = { path = "../park-net" }
 park-storage = { path = "../park-storage" }
 http = "1"

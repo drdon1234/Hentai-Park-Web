@@ -288,6 +288,7 @@ enum InstalledSources {
   let incognito: Bool
   let tr: (String) -> String
   var startingTag: DetailSearchTag? = nil
+  var startingLink: URL? = nil
   let close: () -> Void
   @State private var filterSearch = false
   @State private var input = ""
@@ -312,7 +313,7 @@ enum InstalledSources {
   @StateObject private var filterPrompt = SitePrompt()
 
   private var feed: String? { chosenFeed ?? site.entryFeed?.key }
-  private var searching: Bool { !keyword.isEmpty || filterSearch }
+  private var searching: Bool { !keyword.isEmpty || filterSearch || startingLink != nil }
   private var scope: String { !searching ? "feed:" + (feed ?? "") : "search" }
   private var commonRules: [String: SiteCommonRule] {
     if searching { return catalog?.searchCommonFilters ?? [:] }
@@ -343,7 +344,7 @@ enum InstalledSources {
             Text(site.name ?? site.key).font(.headline)
             if catalog?.hasSettings == true { Button(tr("站点设置")) { showLogin = true } }
           }.padding(.horizontal)
-          if site.search == true {
+          if site.search == true && startingLink == nil {
             HStack {
               TextField(tr("搜索"), text: $input).onSubmit(submit)
               Button(tr("搜索"), action: submit)
@@ -363,7 +364,7 @@ enum InstalledSources {
                 Text(catalog.feeds.first { $0.key == feed }.map { catalog.localized($0.label ?? $0.key) } ?? tr("全部站点"))
               }
             }
-            if !definitions.isEmpty || !commonRules.isEmpty { Button(tr("筛选")) { showFilters = true } }
+            if startingLink == nil && (!definitions.isEmpty || !commonRules.isEmpty) { Button(tr("筛选")) { showFilters = true } }
           }
           List {
             ForEach(works) { item in
@@ -412,7 +413,7 @@ enum InstalledSources {
         let result = try await prompt.perform { ticket in
           try await session.sitePage(
             library, site: site, keyword: keyword, page: page, cursor: cursor, feedKey: feed,
-            values: filters[scope] ?? SiteBrowseOptions.defaults(definitions), filterSearch: filterSearch,
+            values: filters[scope] ?? SiteBrowseOptions.defaults(definitions), filterSearch: filterSearch, link: startingLink,
             common: try SiteCommonRule.validated(limits[scope] ?? [:], rules: commonRules), confirmation: ticket)
         }
         try Task.checkCancellation()
@@ -535,6 +536,7 @@ enum InstalledSources {
   @State private var article: [SiteArticleBlock] = []
   @State private var selectedBlock: Int?
   @State private var relatedWork: SiteWork?
+  @State private var authorLink: String?
   @State private var detailSearch: DetailSearchTag?
   @State private var searchPresented = false
   @State private var domainSearch = false
@@ -620,6 +622,17 @@ enum InstalledSources {
                 if site.category != nil {
                   Button(tr("跨站查找版本")) { domainSearch = true }
                 }
+              }
+            }
+            if let authors = detail.authors, !authors.isEmpty, !detail.searchTags.contains(where: { authors.contains($0.name) }) {
+              Text(tr("作者")).font(.headline)
+              ForEach(Array(authors.enumerated()), id: \.offset) { _, name in
+                if let link = detail.authorSearch?.url {
+                  Button(name) { authorLink = link }
+                } else if site.search == true {
+                  Button(name) { searchDetail(DetailSearchTag(name: name, keyword: detail.authorSearch?.keyword,
+                    filters: detail.authorSearch?.filters ?? [:])) }
+                } else { Text(name) }
               }
             }
             if !detail.searchTags.isEmpty {
@@ -727,6 +740,11 @@ enum InstalledSources {
       } else {
         ProgressView()
       }
+    }.sheet(isPresented: Binding(get: { authorLink != nil }, set: { if !$0 { authorLink = nil } })) {
+      if let link = authorLink {
+        AnyView(AuthorDestination(session: session, library: library, site: site, address: link, locale: locale,
+          incognito: incognito, tr: tr, close: { authorLink = nil }))
+      }
     }.sheet(isPresented: $searchPresented) {
       if let detailSearch {
         AnyView(SourceResults(session: session, library: library, site: site, locale: locale, incognito: incognito,
@@ -760,6 +778,54 @@ enum InstalledSources {
         showLogin = false; attempt += 1
       })
     }
+  }
+}
+
+@MainActor private struct AuthorDestination: View {
+  @Environment(\.openURL) private var openURL
+  let session: ProgressSession
+  let library: SourceLibrary
+  let site: InstalledSite
+  let address: String
+  let locale: String
+  let incognito: Bool
+  let tr: (String) -> String
+  let close: () -> Void
+  @State private var target: SiteLinkTarget?
+  @State private var problem: String?
+  @State private var attempt = 0
+  @StateObject private var prompt = SitePrompt()
+
+  var body: some View {
+    Group {
+      switch target {
+      case .work(let source, let id):
+        SiteDetails(session: session, library: library, site: source, workId: id, preview: nil,
+          locale: locale, incognito: incognito, tr: tr, close: close)
+      case .search(let source, let url):
+        SourceResults(session: session, library: library, site: source, locale: locale,
+          incognito: incognito, tr: tr, startingLink: url, close: close)
+      default:
+        VStack {
+          Button(tr("返回"), action: close)
+          if let problem {
+            Text(tr(problem))
+            Button(tr("重试")) { attempt += 1 }
+          } else { ProgressView() }
+        }
+      }
+    }.task(id: attempt) {
+      problem = nil
+      do {
+        let result = try await prompt.perform {
+          try await session.contentLink(library, source: site, address: address, confirmation: $0)
+        }
+        try Task.checkCancellation()
+        if case .external(let url) = result {
+          openURL(url) { opened in if opened { close() } else { problem = "无法打开原站" } }
+        } else { target = result }
+      } catch { if !Task.isCancelled { problem = siteMessage(error) } }
+    }.siteConfirmation(prompt, tr: tr)
   }
 }
 

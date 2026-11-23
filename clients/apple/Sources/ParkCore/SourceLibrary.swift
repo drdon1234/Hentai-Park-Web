@@ -171,6 +171,18 @@ public enum SiteArticleBlock: Decodable, Sendable {
   }
 }
 
+public struct AuthorSearch: Decodable, Sendable {
+  public let keyword: String?
+  public let filters: [String: PluginOptionValue]?
+  public let url: String?
+}
+
+public enum SiteLinkTarget: Sendable {
+  case work(InstalledSite, String)
+  case search(InstalledSite, URL)
+  case external(URL)
+}
+
 public struct SiteWork: Decodable, Identifiable, Sendable {
   public struct Chapter: Decodable, Identifiable, Sendable {
     public let id: String
@@ -189,6 +201,8 @@ public struct SiteWork: Decodable, Identifiable, Sendable {
     tagGroups?.flatMap { group in group.entries.map { group.namespace.isEmpty ? $0.name : group.namespace + ":" + $0.name } }
   }
   public var searchTags: [DetailSearchTag] { tagGroups?.flatMap(\.entries) ?? [] }
+  public let authors: [String]?
+  public let authorSearch: AuthorSearch?
   public let workCode: String?
   public let editions: [String]?
   public fileprivate(set) var variants: [SiteWork] = []
@@ -218,7 +232,7 @@ public struct SiteWork: Decodable, Identifiable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case id, title, subtitle, description, cover, chapters, chaptersComplete, singleChapterId
     case tagGroups = "tags"
-    case workCode, editions
+    case workCode, editions, authors, authorSearch
     case voiceRoot, voiceMediaForm, voiceTrackKinds, voiceSubtitles
   }
 }
@@ -455,9 +469,60 @@ extension ProgressSession {
     }
   }
 
+  public func contentLink(_ library: SourceLibrary, source: InstalledSite, address: String,
+    confirmation: ManualRead? = nil) async throws -> SiteLinkTarget {
+    func webURL(_ value: String) -> URL? {
+      guard let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+            url.host != nil, url.user == nil, url.password == nil else { return nil }
+      return url
+    }
+    guard let url = webURL(address) else { throw SiteReadError.malformed }
+    let sites = try await installedSites(library)
+    let root = directory
+    for site in [source] + sites.filter({ $0.key != source.key }) {
+      let data = try await run { _, request in
+        try library.service(directory: root, request: request).sourceManifest(source: site.key, request: request)
+      }
+      guard let manifest = try JSONSerialization.jsonObject(with: Data(data.utf8)) as? [String: Any],
+            let domains = manifest["domains"] as? [String] else { continue }
+      func owns(_ link: URL) -> Bool {
+        guard let host = link.host?.lowercased(), link.scheme?.lowercased() == "https", (link.port ?? 443) == 443 else { return false }
+        return domains.contains { domain in
+          let name = domain.lowercased()
+          return !name.isEmpty && (host == name || host.hasSuffix("." + name))
+        }
+      }
+      guard owns(url) else { continue }
+      let capabilities = manifest["capabilities"] as? [String: Any]
+      if capabilities?["resolveContentLink"] as? Bool == true {
+        let args = String(decoding: try JSONEncoder().encode([address]), as: UTF8.self)
+        let data = try await siteRead(library, site: site.key, method: .resolveContentLink, arguments: args, confirmation: confirmation)
+        guard let row = try JSONSerialization.jsonObject(with: Data(data.utf8), options: .fragmentsAllowed) as? [String: Any] else { continue }
+        switch row["type"] as? String {
+        case "work":
+          if let id = row["id"] as? String, !id.isEmpty, id.utf8.count <= 8192 { return .work(site, id) }
+        case "search", "external":
+          if let value = row["url"] as? String, let result = webURL(value), owns(result) {
+            if row["type"] as? String == "external" { return .external(result) }
+            if capabilities?["searchLink"] as? Bool == true { return .search(site, result) }
+          }
+        default: break
+        }
+      } else if site.detail {
+        for pattern in manifest["linkPatterns"] as? [String] ?? [] {
+          guard let regex = try? NSRegularExpression(pattern: pattern),
+                let hit = regex.firstMatch(in: address, range: NSRange(address.startIndex..., in: address)),
+                let range = Range(hit.range(at: hit.numberOfRanges > 1 ? 1 : 0), in: address), !range.isEmpty else { continue }
+          return .work(site, String(address[range]))
+        }
+      }
+    }
+    return .external(url)
+  }
+
   public func sitePage(
     _ library: SourceLibrary, site: InstalledSite, keyword: String, page: Int, cursor: String?,
-    feedKey: String? = nil, values: [String: PluginOptionValue]? = nil, filterSearch: Bool = false,
+    feedKey: String? = nil, values: [String: PluginOptionValue]? = nil, filterSearch: Bool = false, link: URL? = nil,
     common: [String: [String: PluginOptionValue]] = [:], confirmation: ManualRead? = nil
   ) async throws -> SiteWorkPage {
     var request: [String: Any] = ["page": page]
@@ -466,7 +531,10 @@ extension ProgressSession {
     let options = try values.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) }
     let args: [Any]
     let method: BrowseMethod
-    if !keyword.isEmpty || filterSearch, site.search == true {
+    if let link {
+      args = [link.absoluteString, request]
+      method = .searchLink
+    } else if !keyword.isEmpty || filterSearch, site.search == true {
       request["keyword"] = keyword
       request["filters"] = options
       args = [request]

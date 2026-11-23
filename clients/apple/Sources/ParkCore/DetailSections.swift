@@ -10,6 +10,7 @@ public struct SiteComment: Decodable, Identifiable, Sendable {
   public let id: String
   public let author: Author?
   public let body: [Part]
+  public let spoiler: Bool?
   public let repliesAvailable: Bool?
   public let replyCount: Int?
   public let replies: [SiteComment]?

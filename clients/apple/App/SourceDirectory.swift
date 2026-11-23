@@ -990,11 +990,11 @@ private enum DetailDestination: Hashable, Identifiable {
             }
             if site.comments && detail.allowsComments {
               DetailEntriesPanel(session: session, library: library, site: site, work: detail, kind: .comments,
-                tr: tr, select: { relatedWork = $0 })
+                locale: locale, incognito: incognito, tr: tr, select: { relatedWork = $0 })
             }
             if site.related || !detail.recommendations.isEmpty {
               DetailEntriesPanel(session: session, library: library, site: site, work: detail, kind: .related,
-                tr: tr, select: { relatedWork = $0 })
+                locale: locale, incognito: incognito, tr: tr, select: { relatedWork = $0 })
             }
           }.frame(maxWidth: .infinity, alignment: .leading).padding()
         }
@@ -1040,7 +1040,7 @@ private enum DetailDestination: Hashable, Identifiable {
         FavoriteFolderSelection(folders: folders, saving: saving, failed: saveFailed, tr: tr,
           cancel: { destination = nil }, save: { changeFavorite(to: true, checkSimilar: false, categories: $0) })
       case .author(let link):
-        AnyView(AuthorDestination(session: session, library: library, site: site, address: link, locale: locale,
+        AnyView(ContentLinkDestination(session: session, library: library, site: site, address: link, locale: locale,
           incognito: incognito, tr: tr, close: { destination = nil }))
       case .search(let tag):
         AnyView(SourceResults(session: session, library: library, site: site, locale: locale, incognito: incognito,
@@ -1255,7 +1255,7 @@ private enum DetailDestination: Hashable, Identifiable {
   }
 }
 
-@MainActor private struct AuthorDestination: View {
+@MainActor private struct ContentLinkDestination: View {
   @Environment(\.openURL) private var openURL
   let session: ProgressSession
   let library: SourceLibrary
@@ -1303,12 +1303,63 @@ private enum DetailDestination: Hashable, Identifiable {
   }
 }
 
+@MainActor private struct SiteCommentBody: View {
+  let row: SiteComment
+  let session: ProgressSession
+  let library: SourceLibrary
+  let site: InstalledSite
+  let locale: String
+  let incognito: Bool
+  let tr: (String) -> String
+  @State private var revealed = false
+  @State private var expanded = false
+  @State private var link: String?
+
+  private var long: Bool { row.body.reduce(0) { $0 + ($1.text?.count ?? 0) } > 800 }
+  private var parts: [(index: Int, text: String)] {
+    var remaining = 800
+    return row.body.enumerated().compactMap { index, part in
+      let text = part.text ?? ""
+      if expanded { return (index,text) }
+      guard remaining > 0 else { return nil }
+      let preview = String(text.prefix(remaining))
+      remaining -= preview.count
+      return (index,preview)
+    }
+  }
+  var body: some View {
+    VStack(alignment: .leading) {
+      if row.spoiler == true && !revealed {
+        Button(tr("显示剧透评论")) { revealed = true }
+      } else {
+        ForEach(parts, id: \.index) { element in
+          let part = row.body[element.index]
+          if part.type == "image", let address = part.url {
+            ArticlePicture(session: session, library: library, site: site.key, address: address,
+              title: element.text, maximum: 1000, tr: tr)
+          } else if part.type == "link", let address = part.url {
+            Button(element.text.isEmpty ? address : element.text) { link = address }
+          } else if !element.text.isEmpty { Text(element.text) }
+        }
+        if long { Button(tr(expanded ? "收起" : "展开全文")) { expanded.toggle() } }
+      }
+    }.sheet(isPresented: Binding(get: { link != nil },set: { if !$0 { link = nil } })) {
+      if let address = link {
+        ContentLinkDestination(session: session, library: library, site: site, address: address, locale: locale,
+          incognito: incognito, tr: tr, close: { link = nil })
+      }
+    }
+  }
+}
+
 @MainActor private struct DetailEntriesPanel: View {
   let session: ProgressSession
   let library: SourceLibrary
   let site: InstalledSite
   let work: SiteWork
   let kind: DetailSectionKind
+  let locale: String
+  let incognito: Bool
   let tr: (String) -> String
   let select: (SiteWork) -> Void
   var parent: SiteComment? = nil
@@ -1322,6 +1373,7 @@ private enum DetailDestination: Hashable, Identifiable {
   @State private var attempt = 0
   @State private var delivered: Int?
   @State private var loading = false
+  @State private var refreshing = false
   @State private var problem: String?
   @StateObject private var prompt = SitePrompt()
 
@@ -1340,6 +1392,7 @@ private enum DetailDestination: Hashable, Identifiable {
               entries.removeAll()
               nextPage = 1
               cursor = nil
+              refreshing = false
               delivered = nil
               attempt += 1
             })) {
@@ -1351,14 +1404,7 @@ private enum DetailDestination: Hashable, Identifiable {
             case .work(let row): Button(row.title) { select(row) }
             case .comment(let row):
               if let name = row.author?.name, !name.isEmpty { Text(name).font(.headline) }
-              ForEach(row.body.indices, id: \.self) { index in
-                let part = row.body[index]
-                if part.type == "image", let address = part.url {
-                  ArticlePicture(session: session, library: library, site: site.key, address: address,
-                    title: part.text ?? "", maximum: 1000, tr: tr)
-                } else if let text = part.text, !text.isEmpty { Text(text) }
-                else if part.type == "link", let address = part.url { Text(address) }
-              }
+              SiteCommentBody(row: row, session: session, library: library, site: site, locale: locale, incognito: incognito, tr: tr)
               if row.repliesAvailable == true || row.replies?.isEmpty == false {
                 Button(tr("查看回复")) { selectedReply = row }
                   .accessibilityHint(row.author?.name ?? "")
@@ -1372,6 +1418,9 @@ private enum DetailDestination: Hashable, Identifiable {
           } else if delivered != nil {
             if entries.isEmpty { Text(tr(kind == .comments ? "暂无评论" : "暂无内容")) }
             if nextPage != nil { Button(tr("加载更多")) { attempt += 1 } }
+            if kind == .comments && (parent == nil || parent?.repliesAvailable == true) {
+              Button(tr("刷新")) { refreshing = true; attempt += 1 }
+            }
           }
         }.task(id: attempt) { await load() }
       }
@@ -1381,16 +1430,17 @@ private enum DetailDestination: Hashable, Identifiable {
         Button(tr("返回")) { selectedReply = nil }
         ScrollView {
           DetailEntriesPanel(session: session, library: library, site: site, work: work, kind: .comments,
-            tr: tr, select: select, parent: row)
+            locale: locale, incognito: incognito, tr: tr, select: select, parent: row)
         }
       }.padding()
     }
   }
 
   private func load() async {
-    guard delivered != attempt, let page = nextPage else { return }
+    guard delivered != attempt, let page = (refreshing ? 1 : nextPage) else { return }
     if let parent, delivered == nil && entries.isEmpty {
       entries = (parent.replies ?? []).map(DetailEntry.comment)
+      if parent.repliesAvailable != true { nextPage = nil; delivered = attempt; return }
     }
     if kind == .related && delivered == nil {
       var seen = Set<String>()
@@ -1402,10 +1452,10 @@ private enum DetailDestination: Hashable, Identifiable {
     do {
       let result = try await prompt.perform { consent in
         try await session.detailEntries(library, site: site, work: work, section: kind, page: page,
-          cursor: cursor, confirmation: consent, sort: sort, parent: parent?.id)
+          cursor: refreshing ? nil : cursor, confirmation: consent, sort: sort, parent: parent?.id)
       }
       try Task.checkCancellation()
-      if result.reset { entries.removeAll() }
+      if result.reset || refreshing { entries.removeAll() }
       if !result.orders.isEmpty { orders = result.orders }
       var seen = Set(entries.map(\.id))
       let fresh = result.entries.filter { seen.insert($0.id).inserted }
@@ -1413,6 +1463,7 @@ private enum DetailDestination: Hashable, Identifiable {
       nextPage = page > 1 && fresh.isEmpty && !result.entries.isEmpty ? nil : result.nextPage
       cursor = result.cursor
       delivered = attempt
+      refreshing = false
     } catch { if !Task.isCancelled { problem = siteMessage(error) } }
     if !Task.isCancelled { loading = false }
   }

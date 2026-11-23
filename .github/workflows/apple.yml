@@ -199,7 +199,7 @@ jobs:
                                      "a36fd8f574664d8c1f59cef6ee8690989d12aaf98ee2b3154d3cb615251b4bee" if os.environ["EXERCISE_SCOPE"] == "collection" else
                                      "a538a3cb2bb9b777d1d9185d9f49f1f9534b16e25abab2165d9f62ed2a1484ae" if os.environ["EXERCISE_SCOPE"] == "migration" else
                                      "909c5a2feaf11b14fbe5f0353db538fbd9f899cc8e0d3408862a1799d5a47ace" if os.environ["EXERCISE_SCOPE"] == "mac-shelf" else
-                                     "0047cf24a554b81a84f574336dfae7d5f3fffd066ba483ac43032cc95e29c354" if os.environ["EXERCISE_SCOPE"] == "mac-setup" else
+                                     "5223f98938b25ecfbb8a04094cf215de95b6d49373aafeb9ea67df2ff61d0494" if os.environ["EXERCISE_SCOPE"] == "mac-setup" else
                                      "29c666e8563a003adeefff2d3eaefd41b9266257fbce98a0ee7fe015744f9ce6" if os.environ["EXERCISE_SCOPE"] == "tavern" else
                                      "20f343939ddfb2059babd083cd3ce5de23f2df26c501a48ddf67260c16f808dc" if os.environ["EXERCISE_SCOPE"] == "pictures" else
                                      "ab6f6c0f95bdb1dfee1451fe8d46f360c7bc6b8563248aec727a9f371d832b12" if os.environ["EXERCISE_SCOPE"] == "reading" else

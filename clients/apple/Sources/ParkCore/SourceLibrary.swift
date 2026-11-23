@@ -417,7 +417,7 @@ extension ProgressSession {
     favorite: Bool? = nil, categories: [Int64]? = nil
   ) async throws -> LibraryWork {
     let root = directory
-    return try await run { store, request in
+    let work = try await run { store, request in
       let service = try library.service(directory: root, request: request)
       let raw = try service.sourceManifest(source: site.key, request: request)
       guard let manifest = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
@@ -468,6 +468,8 @@ extension ProgressSession {
         historyMs: nil, historyChapter: nil, historyPage: 0, chapters: chapters,
         contentDomain: domain)
     }
+    if favorite != nil { await Self.favoritesChanged([work.libraryID]) }
+    return work
   }
   public func lastReadChapter(source: String, work: String) async throws -> String? {
     try await run { store, _ in try store.lastReadChapter(source: source, work: work) }
@@ -485,10 +487,12 @@ extension ProgressSession {
     summary["chapters"] = item.chapters?.map { ["id": $0.id, "title": $0.title ?? $0.id] }
     summary["chaptersComplete"] = item.chaptersComplete
     let json = String(decoding: try JSONSerialization.data(withJSONObject: summary), as: UTF8.self)
-    return try await run { store, _ in
+    let removed = try await run { store, _ in
       try store.migrateFavorite(fromSource: work.source, fromId: work.workId, toSource: site.key,
         detailJson: json, categories: categories, progress: progress, remove: remove)
     }
+    await Self.favoritesChanged([work.libraryID, LibraryWorkID(source: site.key, work: item.id)])
+    return removed
   }
   public func sites(_ library: SourceLibrary) async throws -> [InstalledSite] {
     try await installedSites(library).filter(\.isBrowsableSite)

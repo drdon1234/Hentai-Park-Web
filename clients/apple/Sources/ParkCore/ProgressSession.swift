@@ -1,5 +1,9 @@
 import Foundation
 
+public extension Notification.Name {
+    static let parkFavoritesChanged = Notification.Name("ParkFavoritesChanged")
+}
+
 public struct LibraryPrivacy: Decodable, Sendable {
     public let adultConfirmed: Bool?
     public let onboarded: Bool?
@@ -160,6 +164,14 @@ public actor ProgressSession {
         try await run { store, _ in try store.libraryCategories(source: nil, work: nil) }
     }
 
+    public func isFavorite(source: String, work: String) async throws -> Bool {
+        try await run { store, _ in try store.isFavorite(source: source, work: work) }
+    }
+
+    @MainActor static func favoritesChanged(_ affected: Set<LibraryWorkID>) {
+        NotificationCenter.default.post(name: .parkFavoritesChanged, object: affected)
+    }
+
     public func similarFavorite(source: String, id: String, title: String) async throws -> SimilarFavorite? {
         try await run { store, _ in try store.similarFavorite(source: source, id: id, title: title) }
     }
@@ -186,10 +198,16 @@ public actor ProgressSession {
     public func editFavorites(_ works: [LibraryWork], action: FavoriteEdit) async throws {
         let keys = works.map { FavoriteIdentity(source: $0.source, work: $0.workId) }
         try await run { store, _ in try store.editFavorites(works: keys, action: action) }
+        if case .remove = action {
+            await Self.favoritesChanged(Set(works.map(\.libraryID)))
+        } else {
+            await Self.favoritesChanged([])
+        }
     }
 
     public func createShelfCategory(_ name: String) async throws {
         try await run { store, _ in try store.nameCategory(id: nil, name: name) }
+        await Self.favoritesChanged([])
     }
 
     public func chapterImages(_ key: ChapterKey, cache: URL) async throws -> ChapterImages {

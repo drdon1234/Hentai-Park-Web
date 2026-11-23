@@ -472,6 +472,7 @@ private final class LibraryModel: ObservableObject {
             if let session = model.session { await shelf.refresh(session) }
         }
         .onChange(of: downloads.revision) { _ in retry += 1 }
+        .onReceive(NotificationCenter.default.publisher(for: .parkFavoritesChanged)) { _ in retry += 1 }
         .onDisappear { model.close() }
         #if os(iOS)
         .onAppear { openNotification() }
@@ -581,7 +582,7 @@ private final class LibraryModel: ObservableObject {
                     if let session = model.session {
                         ShelfControls(options: shelf, session: session, visible: filtered,
                             sources: Array(Set(rows.filter(\.favorite).map(\.source))).sorted(),
-                            incognito: access.privacy?.incognito == true, tr: access.tr) { retry += 1 }
+                            incognito: access.privacy?.incognito == true, tr: access.tr)
                     }
                 }
                 Section(header: Text(access.tr(index == 0 ? "继续看" : labels[index]))) {

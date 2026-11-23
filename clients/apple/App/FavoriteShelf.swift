@@ -299,7 +299,6 @@ private extension View {
     let sources: [String]
     let incognito: Bool
     let tr: (String) -> String
-    let refresh: () -> Void
     @State private var panel: Panel?
     @State private var draft = ShelfPreferences()
     @State private var searchDraft = ""
@@ -345,7 +344,6 @@ private extension View {
                     cancel: { panel = nil }, completed: { message, finished in
                         outcome = message
                         if finished { options.finishSelection(); panel = nil }
-                        refresh()
                     })
             }
         }
@@ -447,7 +445,6 @@ private extension View {
                 failed = false
                 panel = nil
                 options.finishSelection()
-                refresh()
             } catch { failed = true }
         }
     }

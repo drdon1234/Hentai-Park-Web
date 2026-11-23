@@ -743,6 +743,8 @@ private enum DetailDestination: Hashable, Identifiable {
   @State private var downloadSheet = false
   @State private var saving = false
   @State private var saveFailed = false
+  @State private var favoriteRevision = 0
+  @State private var favoriteReadFailed = false
   @State private var cover: CGImage?
   @State private var imageFailed = false
   @State private var showLogin = false
@@ -751,6 +753,13 @@ private enum DetailDestination: Hashable, Identifiable {
   @State private var imageAttempt = 0
   @StateObject private var prompt = SitePrompt()
   var body: some View {
+    content.onReceive(NotificationCenter.default.publisher(for: .parkFavoritesChanged)) { event in
+      guard let ids = event.object as? Set<LibraryWorkID>, !ids.isEmpty else { return }
+      if work.map({ ids.contains($0.libraryID) }) ?? true { favoriteRevision += 1 }
+    }
+  }
+
+  @ViewBuilder private var content: some View {
     if let index = selectedBlock, let detail {
       ArticleGallery(session: session, library: library, site: site.key, work: detail,
         blocks: article, selection: index, tr: tr, select: { selectedBlock = $0 })
@@ -786,24 +795,24 @@ private enum DetailDestination: Hashable, Identifiable {
     }
   }
 
-  private func changeFavorite(checkSimilar: Bool, categories: [Int64]? = nil) {
-    guard let detail, let work, !saving else { return }
+  private func changeFavorite(to favorite: Bool, checkSimilar: Bool, categories: [Int64]? = nil) {
+    guard let detail, !saving else { return }
     saving = true
     saveFailed = false
     Task { @MainActor in
       defer { saving = false }
       do {
-        if !work.favorite, checkSimilar,
+        if favorite, checkSimilar,
           let match = try await session.similarFavorite(source: site.key, id: detail.id, title: detail.title) {
           destination = .similar(source: match.source, id: match.id, title: match.title)
           return
         }
-        if !work.favorite, categories == nil, try await session.favoritePreferences().askCategoryOnFavorite == true {
+        if favorite, categories == nil, try await session.favoritePreferences().askCategoryOnFavorite == true {
           let folders = try await session.shelfCategories().map { FavoriteFolder(id: $0.id, name: $0.name) }
           if !folders.isEmpty { destination = .category(folders); return }
         }
         self.work = try await session.openSiteWork(library, site: site, item: detail, incognito: incognito,
-          favorite: !work.favorite, categories: categories)
+          favorite: favorite, categories: categories)
         destination = nil
       } catch { if !Task.isCancelled { saveFailed = true } }
     }
@@ -905,8 +914,18 @@ private enum DetailDestination: Hashable, Identifiable {
                 }
               }
               Button(tr(work.favorite ? "取消应用内收藏" : "应用内收藏")) {
-                changeFavorite(checkSimilar: true)
-              }.disabled(saving)
+                changeFavorite(to: !work.favorite, checkSimilar: true)
+              }.disabled(saving || favoriteReadFailed)
+              .task(id: favoriteRevision) {
+                guard favoriteRevision > 0 else { return }
+                do {
+                  let saved = try await session.isFavorite(source: work.source, work: work.workId)
+                  try Task.checkCancellation()
+                  self.work?.favorite = saved
+                  favoriteReadFailed = false
+                } catch { if !Task.isCancelled { favoriteReadFailed = true } }
+              }
+              if favoriteReadFailed { Button(tr("重试")) { favoriteRevision += 1 } }
               if saveFailed { Text(tr("保存失败，请重试")) }
                 if !work.chapters.isEmpty && (work.media == "comic" || work.media == "novel" || work.media == "video" && site.nativeVideo) {
                   Button(tr("下载")) { downloadSheet = true }
@@ -999,7 +1018,7 @@ private enum DetailDestination: Hashable, Identifiable {
           Text(tr("书库中已有相似作品")).font(.headline)
           Text("「\(title)」（\(source)）")
           Button(tr("打开已有")) { destination = .existing(source: source, id: id, title: title) }
-          Button(tr("仍然收藏")) { changeFavorite(checkSimilar: false) }
+          Button(tr("仍然收藏")) { changeFavorite(to: true, checkSimilar: false) }
           Button(tr("取消")) { destination = nil }
           if saveFailed { Text(tr("保存失败，请重试")) }
         }.padding().disabled(saving)
@@ -1008,7 +1027,7 @@ private enum DetailDestination: Hashable, Identifiable {
           incognito: incognito, tr: tr, back: { destination = nil }))
       case .category(let folders):
         FavoriteFolderSelection(folders: folders, saving: saving, failed: saveFailed, tr: tr,
-          cancel: { destination = nil }, save: { changeFavorite(checkSimilar: false, categories: $0) })
+          cancel: { destination = nil }, save: { changeFavorite(to: true, checkSimilar: false, categories: $0) })
       case .author(let link):
         AnyView(AuthorDestination(session: session, library: library, site: site, address: link, locale: locale,
           incognito: incognito, tr: tr, close: { destination = nil }))

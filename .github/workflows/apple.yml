@@ -190,8 +190,8 @@ jobs:
               raise SystemExit("构建运行与指定候选或工作流不一致")
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
-                                     "c80d74f57460570d3767717a321b3f506531ad68013a2db66450843ec8bf5be3" if os.environ["EXERCISE_SCOPE"] == "storage" else
-                                     "831fd1273f2959f3df67ba302e70c079efa154a0d08af8560495f0955b675353" if os.environ["EXERCISE_SCOPE"] == "discovery-scope" else
+                                     "ae6eaa7c454f76b0e691d15c6b139011d6da35e30bff134ccae766f2a7ff6e89" if os.environ["EXERCISE_SCOPE"] == "storage" else
+                                     "88169be8e32ce130f56c2f5375e5469a9d6772ca832e4f3584062c699a2c7752" if os.environ["EXERCISE_SCOPE"] == "discovery-scope" else
                                      "d2985cbdd16215a8676ee6cea65cbc02cc178ebd3ecfa488d2e4ee4fe4430df5" if os.environ["EXERCISE_SCOPE"] == "download-actions" else
                                      "30785acdc161f1d9f3c3181827e7e1685e9ec7b182de155c0ebfa9c78540be2b" if os.environ["EXERCISE_SCOPE"] == "setup" else
                                      "eafdfd2cd133ef771b61d80e37d6ede7a94b58ed23628d41c55d8e6aebdbdd89" if os.environ["EXERCISE_SCOPE"] == "shelf" else

@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-shelf, mac-setup, migration, download-actions, discovery-scope, shelf-display, detail-sections, storage, domain-recheck]
+        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-shelf, mac-setup, migration, download-actions, discovery-scope, download-entry, shelf-display, detail-sections, storage, domain-recheck]
         default: full
 permissions:
   contents: read
@@ -157,7 +157,7 @@ jobs:
       matrix:
         include: >-
           ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record","mac-shelf","mac-setup"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
-          || contains(fromJSON('["media","download-actions","discovery-scope","shelf-display","detail-sections","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
+          || contains(fromJSON('["media","download-actions","discovery-scope","download-entry","shelf-display","detail-sections","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'audio' && '[{"host":"iPhone","runtime":"18.6"}]'
           || inputs.scope == 'domain-recheck' && '[{"host":"iPhone","runtime":"18.6"}]'
           || contains(fromJSON('["movie","domains","reading","pictures","tavern","setup","shelf","collection","migration","game"]'), inputs.scope) && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
@@ -191,6 +191,7 @@ jobs:
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
                                      "f901ed973e5fa9f8655010549d200bc804804c1924920277f7caa98afdd9d4e9" if os.environ["EXERCISE_SCOPE"] == "storage" else
+                                     "751e3896d4a1d9c232d5e39e9eab0b4fcb62589b8b5e705aa06ade0c51766ac4" if os.environ["EXERCISE_SCOPE"] == "download-entry" else
                                      "4b98802fdca70a1b9544b8666a4f295a84c839f595f0088a3ea75bcd9dffdcbd" if os.environ["EXERCISE_SCOPE"] == "shelf-display" else
                                      "59710511b649e6358f19f17fd73dd31c93abf7d930a05b37702ffd1664e68b98" if os.environ["EXERCISE_SCOPE"] == "detail-sections" else
                                      "b41f08564311a32634896e708ba982e5c0a015aa85b61253f7fb94e8f912d973" if os.environ["EXERCISE_SCOPE"] == "discovery-scope" else

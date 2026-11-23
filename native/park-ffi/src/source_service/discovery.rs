@@ -178,6 +178,8 @@ impl SourceService {
                     "searchSuggestions":manifest["capabilities"]["searchSuggestions"],
                     "rankings":manifest["capabilities"]["rankings"],
                     "rankingOnly":manifest["rankingOnly"],
+                    "rankingCategories":manifest["rankings"].as_array().into_iter().flatten()
+                        .filter_map(|board| board["category"].as_str()).collect::<Vec<_>>(),
                     "metadata":manifest["metadataOnly"], "reverse":manifest["capabilities"]["reverseSearch"],
                     "reverseCategory":manifest["reverseSearchCategory"]
                 })),

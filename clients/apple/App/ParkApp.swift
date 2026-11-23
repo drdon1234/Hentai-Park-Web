@@ -422,6 +422,7 @@ private final class LibraryModel: ObservableObject {
     private enum Destination {
         case sites, manageSites, search, subscriptions, updates, rankings, recordings, settings
         case site(InstalledSite)
+        case references(String, [InstalledSite])
         case work(LibraryWork), chapter(ChapterKey)
     }
     @State private var destination: Destination?
@@ -654,7 +655,7 @@ private final class LibraryModel: ObservableObject {
                 }
                 if index == 0, let session = model.session, let library = InstalledSources.library {
                     HomeSiteGroups(session: session, library: library, interests: access.privacy?.homeCategories ?? [],
-                        tr: access.tr) { destination = .site($0) }
+                        tr: access.tr, references: { destination = .references($0, $1) }) { destination = .site($0) }
                 }
             }
         } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
@@ -675,6 +676,10 @@ private final class LibraryModel: ObservableObject {
             BroadcastRecordings(session: session, tr: access.tr, back: leaveChapter)
         } else if case .settings? = destination {
             AppleSettingsPanel(access: access, session: model.session, back: leaveChapter)
+        } else if case .references(let domain, let sources)? = destination, let session = model.session,
+                  let library = InstalledSources.library {
+            ReferenceDirectory(session: session, library: library, domain: domain, sites: sources, locale: access.locale,
+                incognito: access.privacy?.incognito == true, tr: access.tr, back: leaveChapter)
         } else if case .sites? = destination, let session = model.session {
             SourceDirectory(session:session, locale:access.locale, incognito:access.privacy?.incognito==true, tr:access.tr, close:leaveChapter)
         } else if case .manageSites? = destination, let session = model.session, let library = InstalledSources.library {
@@ -857,6 +862,7 @@ let appleCategoryOptions: [AppleCategoryOption] = [
     let library: SourceLibrary
     let interests: [String]
     let tr: (String) -> String
+    let references: (String, [InstalledSite]) -> Void
     let open: (InstalledSite) -> Void
     @State private var sites: [InstalledSite] = []
     @State private var failed = false
@@ -902,9 +908,13 @@ let appleCategoryOptions: [AppleCategoryOption] = [
             }.pickerStyle(.menu).disabled(saving)
             if failed { Button(tr("站点加载失败，请重试")) { attempt += 1 } }
             ForEach(categories) { option in
-                let rows = displayOrder.ordered(sites.filter { $0.category == option.id })
-                if !rows.isEmpty && (interests.isEmpty || interests.contains(option.id)) {
+                let rows = displayOrder.ordered(sites.filter { $0.isBrowsableSite && $0.category == option.id })
+                let catalogs = displayOrder.ordered(sites.filter { $0.offersReference(in: option.id) })
+                if (!rows.isEmpty || !catalogs.isEmpty) && (interests.isEmpty || interests.contains(option.id)) {
                     DisclosureGroup(tr(option.label)) {
+                        if !catalogs.isEmpty {
+                            Button(tr("搜索作品资料")) { references(option.id, catalogs) }
+                        }
                         ForEach(rows) { site in Button(site.name ?? site.key) { open(site) } }
                     }
                 }
@@ -914,7 +924,7 @@ let appleCategoryOptions: [AppleCategoryOption] = [
         }.task(id: attempt) {
             do {
                 let settings = try await session.privacySettings()
-                let values = try await session.sites(library)
+                let values = try await session.installedSites(library)
                 try Task.checkCancellation()
                 dimension = settings.homeDimension ?? "all"
                 media = settings.homeMedia ?? "all"

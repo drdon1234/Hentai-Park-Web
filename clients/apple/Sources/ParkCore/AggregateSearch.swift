@@ -6,7 +6,7 @@ public struct SearchScope: Sendable {
 }
 
 extension ProgressSession {
-  public func searchScope(_ library: SourceLibrary, category: String? = nil, preferred: String? = nil) async throws -> SearchScope {
+  public func searchScope(_ library: SourceLibrary, category: String? = nil, preferred: String? = nil, metadataOnly: Bool = false) async throws -> SearchScope {
     struct Scope: Decodable, Sendable {
       let aggregateExcluded: [String]?
       let domainOrder: [String]?
@@ -16,8 +16,9 @@ extension ProgressSession {
     let settings = try await preferences(Scope.self)
     let domains = Set(discoveryDomains(order: settings.domainOrder ?? [],
                                        dimension: settings.homeDimension ?? "all", media: settings.homeMedia ?? "all"))
-    let available = try await sites(library).filter { site in
-      site.search == true && site.metadata != true && (category.map { allowed in site.category == allowed } ?? domains.contains(site.category ?? ""))
+    let available = try await installedSites(library).filter { site in
+      site.search == true && (metadataOnly ? site.metadata == true && site.rankingOnly != true : site.isBrowsableSite)
+        && (category.map { allowed in site.category == allowed } ?? domains.contains(site.category ?? ""))
     }
     if preferred == "preferred", let first = available.first { return SearchScope(sites: [first], excluded: []) }
     if let preferred, let site = available.first(where: { $0.key == preferred }) { return SearchScope(sites: [site], excluded: []) }

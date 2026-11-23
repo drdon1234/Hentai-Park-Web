@@ -130,6 +130,79 @@ enum InstalledSources {
   }
 }
 
+@MainActor struct ReferenceDirectory: View {
+  let session: ProgressSession
+  let library: SourceLibrary
+  let domain: String
+  let sites: [InstalledSite]
+  let locale: String
+  let incognito: Bool
+  let tr: (String) -> String
+  let back: () -> Void
+  @State private var input = ""
+  @State private var keyword: String?
+  @State private var source: InstalledSite?
+
+  var body: some View {
+    if let keyword {
+      AggregateSearchPage(session: session, locale: locale, incognito: incognito, tr: tr,
+          back: { self.keyword = nil }, initialKeyword: keyword, category: domain, metadataOnly: true)
+    } else if let source {
+      SourceResults(session: session, library: library, site: source, locale: locale, incognito: incognito,
+                    tr: tr, referenceDomain: domain) { self.source = nil }
+    } else {
+      VStack(alignment: .leading) {
+        HStack { Button(tr("返回"), action: back); Text(tr("搜索作品资料")).font(.headline) }
+        HStack {
+          TextField(tr(domain == "jav" ? "搜索番号、作品名或演员" : "搜索作品名、标签或作者"), text: $input).onSubmit(submit)
+          Button(tr("搜索"), action: submit)
+        }
+        List(sites) { site in Button(site.name ?? site.key) { source = site } }
+      }.padding()
+    }
+  }
+
+  private func submit() {
+    let term = input.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !term.isEmpty { keyword = term }
+  }
+}
+
+@MainActor struct ReferenceDetailPage: View {
+  let session: ProgressSession
+  let library: SourceLibrary
+  let site: InstalledSite
+  let id: String
+  let tr: (String) -> String
+  let back: () -> Void
+  @StateObject private var prompt = SitePrompt()
+  @State private var reference: ChartReference?
+  @State private var failure: String?
+  @State private var attempt = 0
+
+  var body: some View {
+    List {
+      Button(tr("返回"), action: back)
+      if let reference {
+        Text(reference.title).font(.headline)
+        if let code = reference.code { Text(code) }
+        if let description = reference.description { Text(description) }
+      } else if let failure {
+        Text(tr(failure)); Button(tr("重试")) { attempt += 1 }
+      } else { ProgressView() }
+    }.task(id: attempt) {
+      failure = nil
+      do {
+        let result = try await prompt.perform { ticket in
+          try await session.referenceDetail(library, site: site, referenceID: id, confirmation: ticket)
+        }
+        try Task.checkCancellation()
+        reference = result
+      } catch { if !Task.isCancelled { failure = siteMessage(error) } }
+    }.siteConfirmation(prompt, tr: tr)
+  }
+}
+
 @MainActor struct SiteOrderView: View {
   @EnvironmentObject private var displayOrder: SiteDisplayOrder
   let session: ProgressSession
@@ -295,6 +368,7 @@ enum InstalledSources {
   let tr: (String) -> String
   var startingTag: DetailSearchTag? = nil
   var startingLink: URL? = nil
+  var referenceDomain: String? = nil
   let close: () -> Void
   @State private var filterSearch = false
   @State private var input = ""
@@ -343,10 +417,14 @@ enum InstalledSources {
   var body: some View {
     Group {
       if let target = selected?.id ?? randomTarget {
-        SiteDetails(
+        if referenceDomain != nil {
+          ReferenceDetailPage(session: session, library: library, site: site, id: target, tr: tr) {
+            selected = nil; randomTarget = nil
+          }.id(target)
+        } else { SiteDetails(
           session: session, library: library, site: site, workId: target,
           preview: selected, locale: locale, incognito: incognito, tr: tr
-        ) { selected = nil; randomTarget = nil }.id(target)
+        ) { selected = nil; randomTarget = nil }.id(target) }
       } else {
         VStack(alignment: .leading) {
           HStack {
@@ -354,7 +432,7 @@ enum InstalledSources {
             Text(site.name ?? site.key).font(.headline)
             if catalog?.hasSettings == true { Button(tr("站点设置")) { showLogin = true } }
           }.padding(.horizontal)
-          if site.search == true && startingLink == nil {
+          if (site.search == true || referenceDomain != nil && site.metadataSearch) && startingLink == nil {
             HStack {
               TextField(tr("搜索"), text: $input).onSubmit(submit)
               Button(tr("搜索"), action: submit)
@@ -401,7 +479,7 @@ enum InstalledSources {
           if let randomError { Text(tr(randomError)).font(.caption) }
           List {
             ForEach(works) { item in
-              if site.detail { Button(item.title) { selected = item } } else { Text(item.title) }
+              if (referenceDomain != nil ? site.metadataDetail : site.detail) { Button(item.title) { selected = item } } else { Text(item.title) }
             }
             if let problem {
               Text(tr(problem))
@@ -455,7 +533,7 @@ enum InstalledSources {
         let result = try await prompt.perform { ticket in
           try await session.sitePage(
             library, site: site, keyword: requestKeyword, page: page, cursor: cursor, feedKey: feed,
-            values: requestValues, filterSearch: requestFilterSearch, link: startingLink,
+            values: requestValues, filterSearch: requestFilterSearch, link: startingLink, referenceDomain: referenceDomain,
             common: try SiteCommonRule.validated(limits[scope] ?? [:], rules: commonRules), confirmation: ticket)
         }
         try Task.checkCancellation()

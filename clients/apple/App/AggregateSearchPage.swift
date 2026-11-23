@@ -10,6 +10,7 @@ import SwiftUI
   var initialKeyword = ""
   var category: String? = nil
   var preferred: String? = nil
+  var metadataOnly = false
   @State private var scope: SearchScope?
   @State private var query = ""
   @State private var term = ""
@@ -26,10 +27,12 @@ import SwiftUI
   var body: some View {
     Group {
       if let selected, let library = InstalledSources.library {
-        SiteDetails(session: session, library: library, site: selected.site, workId: selected.item.id,
+        if metadataOnly {
+          ReferenceDetailPage(session: session, library: library, site: selected.site, id: selected.item.id, tr: tr) { self.selected = nil }
+        } else { SiteDetails(session: session, library: library, site: selected.site, workId: selected.item.id,
                     preview: selected.item, locale: locale, incognito: incognito, tr: tr) {
           self.selected = nil
-        }
+        } }
       } else {
         VStack(alignment: .leading) {
           HStack {
@@ -46,7 +49,7 @@ import SwiftUI
             ForEach(rows) { row in
               Section(header: Text(row.site.name ?? row.site.key)) {
                 ForEach(row.items) { item in
-                  if row.site.detail { Button(item.title) { selected = (row.site, item) } }
+                  if metadataOnly ? row.site.metadataDetail : row.site.detail { Button(item.title) { selected = (row.site, item) } }
                   else { Text(item.title) }
                 }
                 if row.busy { ProgressView() }
@@ -65,7 +68,7 @@ import SwiftUI
     }.task(id: reload) {
       do {
         guard let library = InstalledSources.library else { throw SiteReadError.malformed }
-        scope = try await session.searchScope(library, category: category, preferred: preferred)
+        scope = try await session.searchScope(library, category: category, preferred: preferred, metadataOnly: metadataOnly)
         if !initialKeyword.isEmpty && term.isEmpty { query = initialKeyword; submit() }
         status = nil
       } catch { if !Task.isCancelled { status = "站点加载失败，请重试" } }

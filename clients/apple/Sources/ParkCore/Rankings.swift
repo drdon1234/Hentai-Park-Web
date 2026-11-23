@@ -196,13 +196,20 @@ extension ProgressSession {
 
   public func chartReference(_ library: SourceLibrary, site: InstalledSite, chart: SiteChart,
                              row: SiteWork, referenceID: String, confirmation: ManualRead? = nil) async throws -> ChartReference {
-    guard site.metadataDetail else { throw SiteReadError.malformed }
-    var args: [Any] = [referenceID]
+    var origin: [String: String]?
     if site.key == chart.site.key && referenceID == row.id {
       var context = ["board": chart.key]
       context["url"] = row.rankingLink?.absoluteString
-      args.append(context)
+      origin = context
     }
+    return try await referenceDetail(library, site: site, referenceID: referenceID, origin: origin, confirmation: confirmation)
+  }
+
+  public func referenceDetail(_ library: SourceLibrary, site: InstalledSite, referenceID: String,
+                              origin: [String: String]? = nil, confirmation: ManualRead? = nil) async throws -> ChartReference {
+    guard site.metadataDetail else { throw SiteReadError.malformed }
+    var args: [Any] = [referenceID]
+    if let origin { args.append(origin) }
     let data = try JSONSerialization.data(withJSONObject: args)
     let raw = try await siteRead(library, site: site.key, method: .metadataDetail,
                                  arguments: String(decoding: data, as: UTF8.self), confirmation: confirmation)

@@ -76,6 +76,15 @@ public struct InstalledSite: Identifiable, Sendable {
   public let metadataDetail: Bool
   let rankingOnly: Bool?
   let metadata: Bool?
+  private let rankingCategories: [String]
+  public var isBrowsableSite: Bool {
+    rankingOnly != true && metadata != true && reverseOnly != true
+      && (entryFeed != nil || search == true || unavailable == true)
+  }
+  public func offersReference(in domain: String) -> Bool {
+    (metadata == true || (rankingOnly == true && metadataDetail))
+      && (category == domain || rankingCategories.contains(domain))
+  }
   let reverseOnly: Bool?
   public var id: String { key }
 
@@ -100,6 +109,7 @@ public struct InstalledSite: Identifiable, Sendable {
     metadataDetail = site["metadataDetail"] as? Bool == true
     rankingOnly = site["rankingOnly"] as? Bool
     metadata = site["metadata"] as? Bool
+    rankingCategories = site["rankingCategories"] as? [String] ?? []
     reverseOnly = site["reverseOnly"] as? Bool
     if let feed = site["entryFeed"] as? [String: Any], let key = feed["key"] as? String {
       var defaults: [String: Any] = [:]
@@ -477,10 +487,7 @@ extension ProgressSession {
     }
   }
   public func sites(_ library: SourceLibrary) async throws -> [InstalledSite] {
-    try await installedSites(library).filter {
-      $0.rankingOnly != true && $0.metadata != true && $0.reverseOnly != true
-        && ($0.entryFeed != nil || $0.search == true || $0.unavailable == true)
-    }
+    try await installedSites(library).filter(\.isBrowsableSite)
   }
 
   public struct ManagedSite: Identifiable, Sendable {
@@ -536,7 +543,7 @@ extension ProgressSession {
     }
   }
 
-  func installedSites(_ library: SourceLibrary) async throws -> [InstalledSite] {
+  public func installedSites(_ library: SourceLibrary) async throws -> [InstalledSite] {
     let root = directory
     return try await run { _, request in
       let service = try library.service(directory: root, request: request)
@@ -641,7 +648,7 @@ extension ProgressSession {
 
   public func sitePage(
     _ library: SourceLibrary, site: InstalledSite, keyword: String, page: Int, cursor: String?,
-    feedKey: String? = nil, values: [String: PluginOptionValue]? = nil, filterSearch: Bool = false, link: URL? = nil,
+    feedKey: String? = nil, values: [String: PluginOptionValue]? = nil, filterSearch: Bool = false, link: URL? = nil, referenceDomain: String? = nil,
     common: [String: [String: PluginOptionValue]] = [:], confirmation: ManualRead? = nil
   ) async throws -> SiteWorkPage {
     var request: [String: Any] = ["page": page]
@@ -650,7 +657,16 @@ extension ProgressSession {
     let options = try values.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) }
     let args: [Any]
     let method: BrowseMethod
-    if let link {
+    if let referenceDomain, !keyword.isEmpty, site.search != true, site.metadataSearch {
+      let arguments = try JSONSerialization.data(withJSONObject: [keyword, ["category": referenceDomain]])
+      let raw = try await siteRead(library, site: site.key, method: .metadataSearch,
+                                   arguments: String(decoding: arguments, as: UTF8.self), confirmation: confirmation)
+      guard let items = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [[String: Any]] else {
+        throw SiteReadError.malformed
+      }
+      let result = try JSONSerialization.data(withJSONObject: ["items": items, "hasNext": false] as [String: Any])
+      return try await decodeSitePage(String(decoding: result, as: UTF8.self), source: site.key, cursor: nil)
+    } else if let link {
       args = [link.absoluteString, request]
       method = .searchLink
     } else if !keyword.isEmpty || filterSearch, site.search == true {

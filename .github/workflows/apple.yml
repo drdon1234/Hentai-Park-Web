@@ -196,7 +196,7 @@ jobs:
                                      "cb12c586ee3213b7cf2a80ec5a066a6b437013f558eb145b2f263808a0d3df36" if os.environ["EXERCISE_SCOPE"] == "shelf-display" else
                                      "5b385c5fad0bdb55b36fa7d9ee0fb240d672e7b2e4ceb1f135161aee20bd5dd4" if os.environ["EXERCISE_SCOPE"] == "host-preview-mac" else
                                      "ffe771be9e821a3e6e75d960d54f1c9fa81d5a5dd5c57064aa926d649f4f1128" if os.environ["EXERCISE_SCOPE"] == "host-preview" else
-                                     "d28d4623987d70bbecaf3cf85f7052a80676c6c87e8e8e79e1e41ac6f92836c4" if os.environ["EXERCISE_SCOPE"] == "host-tags" else
+                                     "9b2fb87f5a5b1520462dba32b73f020d79843bb3922658639fb206942478f2f8" if os.environ["EXERCISE_SCOPE"] == "host-tags" else
                                      "d6308468e3dbe604f9c0d9cfcf94ea375619cd0a9a968aae9e5023a89dec4d61" if os.environ["EXERCISE_SCOPE"] == "host-actions" else
                                      "fdaf167c7839870c77b0c2efcb178adf5eef6ff3d3c0831c35c015a33f7b05d3" if os.environ["EXERCISE_SCOPE"] == "detail-sections" else
                                      "805376221ef5abd35787d255de5282fa51dbee63dd1d4c56403e3ea470254a8b" if os.environ["EXERCISE_SCOPE"] == "discovery-scope" else

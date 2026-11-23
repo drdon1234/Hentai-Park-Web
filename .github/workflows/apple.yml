@@ -195,7 +195,7 @@ jobs:
                                      "9dc137fa6f259cfb761d812a63cbd7e0c9927f23fb75cc4183e3192b06422407" if os.environ["EXERCISE_SCOPE"] == "download-entry" else
                                      "3179165a607829ba6c2a9071b0daade1fbe981841ae5833ac2cf72b41bfcc1b7" if os.environ["EXERCISE_SCOPE"] == "shelf-display" else
                                      "59710511b649e6358f19f17fd73dd31c93abf7d930a05b37702ffd1664e68b98" if os.environ["EXERCISE_SCOPE"] == "detail-sections" else
-                                     "5ada30f86d5b44d7fb3c4a3f3239b1a9063686a8f7d1b5fe1a59931c54d9e5ee" if os.environ["EXERCISE_SCOPE"] == "discovery-scope" else
+                                     "3dc7d7273a7498a7e433655b0540621ec7eebfcee15a88f39c131796843c3417" if os.environ["EXERCISE_SCOPE"] == "discovery-scope" else
                                      "5e3dcf168c2128d6d2a4dc9a65b6644e8a13d313a3aedb1636e12c0437d5813d" if os.environ["EXERCISE_SCOPE"] == "download-actions" else
                                      "30785acdc161f1d9f3c3181827e7e1685e9ec7b182de155c0ebfa9c78540be2b" if os.environ["EXERCISE_SCOPE"] == "setup" else
                                      "e8b98734706140939a2157137a73df73e00e69617f54602885bf2fb9b0be1d4a" if os.environ["EXERCISE_SCOPE"] == "shelf" else

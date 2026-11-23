@@ -190,15 +190,15 @@ jobs:
               raise SystemExit("构建运行与指定候选或工作流不一致")
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
-                                     "ae6eaa7c454f76b0e691d15c6b139011d6da35e30bff134ccae766f2a7ff6e89" if os.environ["EXERCISE_SCOPE"] == "storage" else
+                                     "87969cc1a85ab2189e447a6c10b07637bc0025fa5bfaea6cc4d42b3aa48e3b49" if os.environ["EXERCISE_SCOPE"] == "storage" else
                                      "59710511b649e6358f19f17fd73dd31c93abf7d930a05b37702ffd1664e68b98" if os.environ["EXERCISE_SCOPE"] == "detail-sections" else
                                      "4e714b711fbfa85e5d6214346da6626f9693c65eac2c07740d4415e962a9926f" if os.environ["EXERCISE_SCOPE"] == "discovery-scope" else
-                                     "d2985cbdd16215a8676ee6cea65cbc02cc178ebd3ecfa488d2e4ee4fe4430df5" if os.environ["EXERCISE_SCOPE"] == "download-actions" else
+                                     "3262987e82fa0edd85b34eac8a53aa6d03889b77c06f18641151b23ddec51a79" if os.environ["EXERCISE_SCOPE"] == "download-actions" else
                                      "30785acdc161f1d9f3c3181827e7e1685e9ec7b182de155c0ebfa9c78540be2b" if os.environ["EXERCISE_SCOPE"] == "setup" else
                                      "e8b98734706140939a2157137a73df73e00e69617f54602885bf2fb9b0be1d4a" if os.environ["EXERCISE_SCOPE"] == "shelf" else
                                      "a36fd8f574664d8c1f59cef6ee8690989d12aaf98ee2b3154d3cb615251b4bee" if os.environ["EXERCISE_SCOPE"] == "collection" else
                                      "a538a3cb2bb9b777d1d9185d9f49f1f9534b16e25abab2165d9f62ed2a1484ae" if os.environ["EXERCISE_SCOPE"] == "migration" else
-                                     "181bec76569608f960953316612f8f1ccea50ca3514f11f391cbbb2c7ea2b57c" if os.environ["EXERCISE_SCOPE"] == "mac-shelf" else
+                                     "909c5a2feaf11b14fbe5f0353db538fbd9f899cc8e0d3408862a1799d5a47ace" if os.environ["EXERCISE_SCOPE"] == "mac-shelf" else
                                      "0047cf24a554b81a84f574336dfae7d5f3fffd066ba483ac43032cc95e29c354" if os.environ["EXERCISE_SCOPE"] == "mac-setup" else
                                      "29c666e8563a003adeefff2d3eaefd41b9266257fbce98a0ee7fe015744f9ce6" if os.environ["EXERCISE_SCOPE"] == "tavern" else
                                      "20f343939ddfb2059babd083cd3ce5de23f2df26c501a48ddf67260c16f808dc" if os.environ["EXERCISE_SCOPE"] == "pictures" else

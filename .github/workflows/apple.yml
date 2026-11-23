@@ -202,7 +202,7 @@ jobs:
                                      "fa50f9d3dfb7a9dafbda5c01781e87b72b0e528cc9ea2537266b595ad8a7ab97" if os.environ["EXERCISE_SCOPE"] == "host-directory" else
                                      "c615d249a495dcb8bae86f840a876d91cdaadfd111ac7104e7c2c711160aec05" if os.environ["EXERCISE_SCOPE"] == "host-update-route" else
                                      "b8ee69930e857826b6f09a0be96e3062a91f0b48d7aeab7e1031685a78588996" if os.environ["EXERCISE_SCOPE"] == "host-update-management" else
-                                     "0275d56c7370fe98b61570345ae8b34a66e3d4c55b757e844e53b1ff12e87118" if os.environ["EXERCISE_SCOPE"] == "host-chapter-actions" else
+                                     "7bc9df4b9cddc87290bea20978e9e8b1cf1c28a5267d8809e57728e19533f5ec" if os.environ["EXERCISE_SCOPE"] == "host-chapter-actions" else
                                      "d087741adf8096ac33528070dbe5f79cee6d735e1402dc58a2ffb296ab792fad" if os.environ["EXERCISE_SCOPE"] == "host-dictionaries" else
                                      "70b3b3473947450a96a533fbf7ff621ca2152cd56f31784fe865fa21a0040b00" if os.environ["EXERCISE_SCOPE"] == "host-favorites" else
                                      "5eefb4f4470a4af95acad553b145bb43a8e9384bfd6e2df3cc23f1e043694a72" if os.environ["EXERCISE_SCOPE"] == "host-metadata" else

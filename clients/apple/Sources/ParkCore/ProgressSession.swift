@@ -16,6 +16,7 @@ public struct LibraryPrivacy: Decodable, Sendable {
     public let homeDimension: String?
     public let homeMedia: String?
     public let domainOrder: [String]?
+    public let proxy: String?
 
     public var subscriptionHours: Int {
         adultConfirmed == true ? max(0, subscriptionUpdateHours ?? 6) : 0
@@ -116,7 +117,7 @@ public actor ProgressSession {
     }
 
     public func setPreference(_ name: String, json: String) async throws {
-        guard ["language", "homeCategories", "domainOrder", "appLockAfter", "subscriptionUpdateHours", "onboarded"].contains(name) else {
+        guard ["language", "homeCategories", "domainOrder", "proxy", "appLockAfter", "subscriptionUpdateHours", "onboarded"].contains(name) else {
             throw CocoaError(.coderInvalidValue)
         }
         try await run { store, _ in try store.savePreference(name: name, json: json) }

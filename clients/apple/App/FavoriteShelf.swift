@@ -1,6 +1,16 @@
 import ParkCore
 import SwiftUI
 
+private extension View {
+    @ViewBuilder func shelfSheetSize() -> some View {
+        #if os(macOS)
+        self.frame(minWidth: 360, minHeight: 300)
+        #else
+        self
+        #endif
+    }
+}
+
 @MainActor private struct ShelfMigration: View {
     let work: LibraryWork
     let session: ProgressSession
@@ -58,7 +68,7 @@ import SwiftUI
             }
             Button(tr("取消"), action: cancel)
         }
-        .padding().disabled(busy).interactiveDismissDisabled(busy)
+        .padding().shelfSheetSize().disabled(busy).interactiveDismissDisabled(busy)
         .siteConfirmation(prompt, tr: tr)
         .task(id: request) {
             busy = true; failed = false
@@ -238,7 +248,7 @@ import SwiftUI
                         } catch { failed = true }
                     }
                 }
-            }.padding().disabled(working).interactiveDismissDisabled()
+            }.padding().shelfSheetSize().disabled(working).interactiveDismissDisabled()
         }
         .sheet(isPresented: $classifying) {
             VStack {
@@ -256,7 +266,7 @@ import SwiftUI
                 }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 if failed { Text(tr("保存失败，请重试")) }
                 Button(tr("取消")) { classifying = false }
-            }.padding().disabled(working)
+            }.padding().shelfSheetSize().disabled(working)
         }
         .alert(tr("取消收藏 {value0} 部作品？").replacingOccurrences(of: "{value0}", with: String(targets.count)),
                isPresented: $removing) {

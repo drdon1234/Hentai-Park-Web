@@ -592,14 +592,22 @@ private final class LibraryModel: ObservableObject {
                                 Button {
                                     if selected { downloadSelection.selected.remove(work.libraryID) }
                                     else { downloadSelection.selected.insert(work.libraryID) }
-                                } label: { Label(work.title, systemImage: selected ? "checkmark.circle.fill" : "circle") }
+                                } label: {
+                                    Label(work.title, systemImage: selected ? "checkmark.circle.fill" : "circle")
+                                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                                }
+                                .accessibilityLabel(Text(work.title))
                                 .accessibilityAddTraits(selected ? [.isSelected] : [])
                             } else if index == 1, shelf.selecting {
                                 let selected = shelf.selected.contains(work.libraryID)
                                 Button {
                                     if selected { shelf.selected.remove(work.libraryID) }
                                     else { shelf.selected.insert(work.libraryID) }
-                                } label: { Label(work.title, systemImage: selected ? "checkmark.circle.fill" : "circle") }
+                                } label: {
+                                    Label(work.title, systemImage: selected ? "checkmark.circle.fill" : "circle")
+                                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                                }
+                                .accessibilityLabel(Text(work.title))
                                 .accessibilityAddTraits(selected ? [.isSelected] : [])
                             } else if index == 0, let chapter = work.historyChapter,
                                ["comic","novel","video","voice","bundle"].contains(work.media), work.contentDomain != "live" {
@@ -922,6 +930,17 @@ let appleCategoryOptions: [AppleCategoryOption] = [
     @ObservedObject var access: LibraryAccess
     let back: () -> Void
     @State private var categories = Set(appleCategoryOptions.map { $0.id })
+    @State private var editProxy = false
+    @State private var proxy = ""
+    @State private var invalidProxy = false
+
+    private func proxySummary(_ value: String) -> String? {
+        guard let url = URLComponents(string: value.contains("://") ? value : "http://" + value),
+              ["http","https"].contains(url.scheme?.lowercased() ?? ""), let host = url.host, !host.isEmpty,
+              let port = url.port, (1...65535).contains(port),
+              url.path.isEmpty || url.path == "/", url.query == nil, url.fragment == nil else { return nil }
+        return host + ":" + String(port)
+    }
 
     var body: some View {
         Form {
@@ -950,6 +969,16 @@ let appleCategoryOptions: [AppleCategoryOption] = [
                     get: { access.privacy?.subscriptionNotificationPreview == true },
                     set: { value in Task { await access.updatePrivacy("subscriptionNotificationPreview", enabled: value) } }
                 ))
+            }
+            Section(header: Text(access.tr("网络"))) {
+                Button(access.tr("HTTP 代理")) {
+                    proxy = access.privacy?.proxy ?? ""
+                    invalidProxy = false
+                    editProxy = true
+                }
+                let stored = access.privacy?.proxy ?? ""
+                Text(stored.isEmpty ? access.tr("未设置（使用系统网络 / VPN）") :
+                    proxySummary(stored) ?? access.tr("代理地址格式无效，请填写主机:端口")).font(.caption)
             }
             Section(header: Text(access.tr("语言"))) {
                 Picker(access.tr("界面语言"), selection: Binding(
@@ -990,6 +1019,27 @@ let appleCategoryOptions: [AppleCategoryOption] = [
             if access.failed { Text(access.tr("保存失败，请重试")) }
         }
         .disabled(access.busy)
+        .sheet(isPresented: $editProxy) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(access.tr("HTTP 代理")).font(.headline)
+                TextField(access.tr("填写代理主机:端口，留空表示不使用"), text: $proxy)
+                    .textFieldStyle(.roundedBorder).onChange(of: proxy) { _ in invalidProxy = false }
+                if invalidProxy { Text(access.tr("代理地址格式无效，请填写主机:端口")) }
+                if access.failed { Text(access.tr("保存失败，请重试")) }
+                HStack {
+                    Button(access.tr("取消")) { editProxy = false }
+                    Button(access.tr("保存")) {
+                        let value = proxy.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard value.isEmpty || proxySummary(value) != nil else { invalidProxy = true; return }
+                        Task {
+                            guard let encoded = try? JSONEncoder().encode(value) else { return }
+                            await access.updatePreference("proxy", json: String(decoding: encoded, as: UTF8.self))
+                            if !access.failed { editProxy = false }
+                        }
+                    }
+                }
+            }.padding().disabled(access.busy).interactiveDismissDisabled(access.busy)
+        }
         .onAppear {
             if let saved = access.privacy?.homeCategories, !saved.isEmpty { categories = Set(saved) }
         }

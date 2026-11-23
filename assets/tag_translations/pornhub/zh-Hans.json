@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "source": "pornhub",
+  "locale": "zh-Hans",
+  "version": "1.1.1",
+  "tags": {
+    "tag:perfect body": "完美身材",
+    "tag:big natural tits": "天然大胸",
+    "tag:natural busty": "天然丰满胸部",
+    "tag:long nipples": "长乳头",
+    "tag:bouncing tits": "晃动的胸部",
+    "tag:woman moans": "女性呻吟",
+    "tag:beautiful busty": "丰满美胸",
+    "tag:pink tits": "粉嫩胸部",
+    "tag:skinny busty": "纤瘦大胸",
+    "tag:skinny big ass": "纤瘦翘臀",
+    "tag:with thongs": "丁字裤",
+    "tag:busty barbie": "大胸芭比",
+    "tag:real busty doll": "丰满真人娃娃",
+    "tag:hot girl": "性感女孩",
+    "tag:riding cock": "骑乘体位",
+    "tag:doggy style": "后入体位",
+    "tag:royal couple": "王室情侣",
+    "tag:amateur": "素人",
+    "tag:18 year cute girl": "18岁可爱女孩",
+    "tag:tiktok girl": "TikTok女孩",
+    "tag:perfect tits": "完美胸部",
+    "tag:the best tits": "极品美胸",
+    "tag:amateur missionary": "素人传教士体位",
+    "tag:doggystyle": "后入体位",
+    "tag:cowgirl riding": "女上骑乘体位",
+    "tag:busty sucking": "大胸口交",
+    "tag:horny girl": "性欲旺盛的女孩",
+    "tag:petite": "娇小"
+  },
+  "coverage": {
+    "scope": "真实详情与列表标签样本，非全站目录",
+    "complete": false,
+    "observed": 51,
+    "translated": 28,
+    "preserved": 0,
+    "unchanged": 0,
+    "unreviewed": 23
+  },
+  "provenance": [
+    {
+      "name": "HentaiPark",
+      "license": "AGPL-3.0-only",
+      "scope": "真实详情与列表标签样本，非全站目录",
+      "homepage": "https://www.pornhub.com"
+    }
+  ]
+}

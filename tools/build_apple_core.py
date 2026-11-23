@@ -47,6 +47,10 @@ def source_resources(destination):
         raise ValueError('内置站点清单含无效文件名')
     for name in [index.name, *names]:
         shutil.copyfile(directory / name, destination / name)
+    for pack in sorted((ROOT / 'assets/tag_translations').glob('*/*.json')):
+        target = destination / 'tag_translations' / pack.parent.name / pack.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(pack, target)
     run('node', 'clients/web/scripts/build-polyfills.mjs', destination / 'park_polyfills.js')
 
 

@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "source": "galgamex",
+  "locale": "zh-Hans",
+  "version": "1.1.3",
+  "tags": {
+    "tags:2d": "二维",
+    "tags:adv": "冒险游戏",
+    "tags:avg": "冒险游戏",
+    "tags:水葬銀貨のイストリア": "水葬銀貨のイストリア",
+    "tags:紺野アスタ": "紺野アスタ",
+    "dlsite": "DLsite",
+    "tags:rpg": "角色扮演游戏",
+    "tags:cosplay": "角色扮演",
+    "tags:slg": "策略游戏",
+    "tags:3d": "三维",
+    "tags:act": "动作游戏",
+    "tags:3p": "三人性爱",
+    "tags:arpg": "动作角色扮演游戏",
+    "tags:uncensored": "无修正",
+    "tags:sim": "模拟游戏",
+    "tags:stg": "射击游戏",
+    "tags:vtuber": "虚拟主播"
+  },
+  "coverage": {
+    "scope": "公开目录去重5247个链接及登录详情；跨页重复与限流导致全量未确认",
+    "complete": false,
+    "observed": 5373,
+    "translated": 14,
+    "preserved": 3,
+    "unchanged": 17,
+    "unreviewed": 5339
+  },
+  "provenance": [
+    {
+      "name": "HentaiPark",
+      "license": "AGPL-3.0-only",
+      "scope": "公开目录去重5247个链接及登录详情；跨页重复与限流导致全量未确认",
+      "homepage": "https://www.galgamex.net"
+    }
+  ]
+}

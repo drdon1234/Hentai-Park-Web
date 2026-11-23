@@ -93,6 +93,8 @@ pub enum StorageError {
     Conflict,
     #[error("cancelled")]
     Cancelled,
+    #[error("invalid_dictionary")]
+    InvalidDictionary,
 }
 
 impl From<rusqlite::Error> for StorageError {

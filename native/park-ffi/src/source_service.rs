@@ -6,6 +6,8 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use uniffi::{Object, Record};
 use url::Url;
 mod plugins;
+mod dictionaries;
+pub use dictionaries::DictionaryIndex;
 mod host_video;
 pub use host_video::open_host_video;
 mod accounts;

@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "source": "pixibb",
+  "locale": "zh-Hans",
+  "version": "1.1.2",
+  "tags": {
+    "hot": "热门",
+    "sexy cosplay": "性感角色扮演",
+    "teacher": "教师",
+    "coser": "角色扮演者",
+    "leotard": "紧身连体衣",
+    "kakegurui": "狂赌之渊",
+    "yumeko jabami": "蛇喰梦子",
+    "honkai: star rail": "崩坏：星穹铁道",
+    "ruan mei": "阮·梅",
+    "collection": "合集",
+    "photoshoot": "写真",
+    "special": "特别篇",
+    "nazuna nanakusa": "七草荠",
+    "yofukashi no uta": "彻夜之歌",
+    "genshin impact": "原神",
+    "raiden shogun": "雷电将军",
+    "arknights": "明日方舟",
+    "kal'tsit": "凯尔希",
+    "goddess of victory: nikke": "胜利女神：妮姬",
+    "shirakami fubuki": "白上吹雪",
+    "vtuber": "虚拟主播",
+    "blue archive": "蔚蓝档案",
+    "shiromi iori": "银镜伊织",
+    "bunny girl": "兔女郎",
+    "houshou marine": "宝钟玛琳",
+    "mfstar": "模范学院",
+    "sexy girl": "性感女孩",
+    "xiuren": "秀人",
+    "youmi": "尤蜜荟",
+    "tag:hot": "热门",
+    "tag:sexy cosplay": "性感角色扮演",
+    "tag:teacher": "教师",
+    "tag:coser": "角色扮演者",
+    "tag:leotard": "紧身连体衣",
+    "re:zero": "Re：从零开始的异世界生活",
+    "azur lane": "碧蓝航线",
+    "tag:arknights": "明日方舟"
+  },
+  "coverage": {
+    "scope": "真实详情与列表标签样本，非全站目录",
+    "complete": false,
+    "observed": 52,
+    "translated": 37,
+    "preserved": 0,
+    "unchanged": 0,
+    "unreviewed": 15
+  },
+  "provenance": [
+    {
+      "name": "HentaiPark",
+      "license": "AGPL-3.0-only",
+      "scope": "真实详情与列表标签样本，非全站目录",
+      "homepage": "https://hub.pixibb.com"
+    }
+  ]
+}

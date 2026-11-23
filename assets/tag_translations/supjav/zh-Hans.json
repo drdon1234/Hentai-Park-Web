@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "source": "supjav",
+  "locale": "zh-Hans",
+  "version": "1.1.1",
+  "tags": {
+    "tag:acme&orgasm": "高潮",
+    "tag:debut production": "出道作品",
+    "tag:facials": "颜射",
+    "tag:kiss": "接吻",
+    "tag:slender": "苗条",
+    "tag:solowork": "单体作品"
+  },
+  "coverage": {
+    "scope": "真实详情与列表标签样本，非全站目录",
+    "complete": false,
+    "observed": 6,
+    "translated": 6,
+    "preserved": 0,
+    "unchanged": 0,
+    "unreviewed": 0
+  },
+  "provenance": [
+    {
+      "name": "HentaiPark",
+      "license": "AGPL-3.0-only",
+      "scope": "真实详情与列表标签样本，非全站目录",
+      "homepage": "https://supjav.com"
+    }
+  ]
+}

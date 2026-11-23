@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "source": "x",
+  "locale": "zh-Hans",
+  "version": "1.1.2",
+  "tags": {
+    "tag:sm": "施虐与受虐",
+    "tag:sp": "拍打调教",
+    "tag:ntr": "寝取",
+    "tag:bdsm": "绑缚、支配与施虐受虐"
+  },
+  "coverage": {
+    "scope": "本次登录时间线话题中的已审校缩写；不代表全站话题",
+    "complete": false,
+    "observed": 34,
+    "translated": 4,
+    "preserved": 0,
+    "unchanged": 0,
+    "unreviewed": 30
+  },
+  "provenance": [
+    {
+      "name": "HentaiPark",
+      "license": "AGPL-3.0-only",
+      "scope": "本次登录时间线话题中的已审校缩写；不代表全站话题",
+      "homepage": "https://x.com"
+    }
+  ]
+}

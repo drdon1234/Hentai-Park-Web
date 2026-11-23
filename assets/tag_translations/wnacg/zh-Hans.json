@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "source": "wnacg",
+  "locale": "zh-Hans",
+  "version": "1.1.2",
+  "tags": {
+    "tag:トリフネ": "トリフネ",
+    "tag:阿黑顏": "阿黑颜",
+    "tag:高叉裝": "高叉装",
+    "tag:丸子頭": "丸子头",
+    "tag:後宮": "后宫",
+    "tag:乳頭刺激": "乳头刺激",
+    "tag:馬尾辮": "马尾辫",
+    "tag:泳裝": "泳装",
+    "tag:高個女": "高个女",
+    "tag:曬痕": "晒痕",
+    "tag:雙馬尾": "双马尾",
+    "tag:亂交": "乱交",
+    "tag:阿嘿顏": "阿嘿颜",
+    "tag:褐色膚": "褐色肤",
+    "tag:打手槍": "打手枪",
+    "tag:夾腿": "夹腿",
+    "tag:馬尾": "马尾",
+    "tag:広弥": "広弥",
+    "tag:雙性戀": "双性恋",
+    "tag:婚紗cosplay": "婚纱Cosplay",
+    "tag:夾心蛋糕": "夹心蛋糕",
+    "tag:情趣內衣": "情趣内衣",
+    "tag:貝合": "贝合",
+    "tag:偷窺": "偷窥",
+    "tag:透視": "透视"
+  },
+  "coverage": {
+    "scope": "真实详情与列表标签样本，非全站目录",
+    "complete": false,
+    "observed": 53,
+    "translated": 23,
+    "preserved": 2,
+    "unchanged": 28,
+    "unreviewed": 0
+  },
+  "provenance": [
+    {
+      "name": "HentaiPark",
+      "license": "AGPL-3.0-only",
+      "scope": "真实详情与列表标签样本，非全站目录",
+      "homepage": "https://www.wnacg.com"
+    }
+  ]
+}

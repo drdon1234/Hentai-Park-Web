@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "source": "nudecosplay",
+  "locale": "zh-Hans",
+  "version": "1.1.1",
+  "tags": {
+    "eula": "优菈",
+    "genshin impact": "原神",
+    "bocchi the rock!": "孤独摇滚！",
+    "anri okita": "冲田杏梨",
+    "honkai: star rail": "崩坏：星穹铁道",
+    "ruan mei": "阮·梅",
+    "squid game": "鱿鱼游戏",
+    "dora the explorer": "爱探险的朵拉",
+    "nahida": "纳西妲",
+    "yoimiya": "宵宫",
+    "hotel transylvania": "精灵旅社",
+    "azur lane": "碧蓝航线",
+    "baltimore": "巴尔的摩",
+    "tag:eula": "优菈",
+    "tag:genshin impact": "原神"
+  },
+  "coverage": {
+    "scope": "真实详情与列表标签样本，非全站目录",
+    "complete": false,
+    "observed": 31,
+    "translated": 15,
+    "preserved": 0,
+    "unchanged": 0,
+    "unreviewed": 16
+  },
+  "provenance": [
+    {
+      "name": "HentaiPark",
+      "license": "AGPL-3.0-only",
+      "scope": "真实详情与列表标签样本，非全站目录",
+      "homepage": "https://nudecosplay.biz"
+    }
+  ]
+}

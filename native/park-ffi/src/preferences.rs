@@ -1,4 +1,31 @@
 use std::{collections::HashMap, sync::Arc};
+use crate::{ProgressStore, StorageError};
+use park_storage::dictionaries;
+
+impl From<dictionaries::Error> for StorageError {
+    fn from(err: dictionaries::Error) -> Self {
+        match err {
+            dictionaries::Error::Invalid => Self::InvalidDictionary,
+            dictionaries::Error::Io => Self::IoFailure,
+        }
+    }
+}
+
+#[uniffi::export]
+impl ProgressStore {
+    pub fn dictionary_inventory(&self) -> Result<String, StorageError> {
+        Ok(dictionaries::inventory(&self.root)?.to_string())
+    }
+    pub fn installed_dictionary(&self, source: String, locale: String) -> Result<Option<Vec<u8>>, StorageError> {
+        Ok(dictionaries::installed(&self.root,&source,&locale)?)
+    }
+    pub fn install_dictionary(&self, source: String, locale: String, bytes: Vec<u8>) -> Result<(), StorageError> {
+        Ok(dictionaries::install(&self.root,&source,&locale,&bytes)?)
+    }
+    pub fn remove_dictionary(&self, source: String, locale: String) -> Result<(), StorageError> {
+        Ok(dictionaries::remove(&self.root,&source,&locale)?)
+    }
+}
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum PreferenceError {

@@ -11,12 +11,12 @@ use std::{
 pub trait BundledScripts: Send + Sync {
     fn asset(&self, name: String) -> Option<Vec<u8>>;
 }
-static CONTRACT: LazyLock<Value> =
+pub(super) static CONTRACT: LazyLock<Value> =
     LazyLock::new(|| serde_json::from_str(park_domain::PUBLIC_CONTRACT).expect("public contract"));
 fn api() -> u64 {
     CONTRACT["sourceProtocol"]["apiVersion"].as_u64().unwrap()
 }
-fn base() -> &'static str {
+pub(super) fn base() -> &'static str {
     CONTRACT["officialRepositories"]["base"].as_str().unwrap()
 }
 fn value<'a>(row: &'a Value, field: &str) -> Result<&'a str> {
@@ -111,6 +111,12 @@ impl SourceService {
         official: bool,
         request: &Request,
     ) -> Result<Vec<u8>> {
+        self.repository_resource(address, official, request, 4 * 1024 * 1024)
+    }
+
+    pub(super) fn repository_resource(
+        &self, address: &str, official: bool, request: &Request, limit: usize,
+    ) -> Result<Vec<u8>> {
         let url = Url::parse(address).map_err(|_| SourceFailure::Unsupported)?;
         if !park_net::public_https(&url) {
             return Err(SourceFailure::Unsupported);
@@ -135,7 +141,7 @@ impl SourceService {
                     connect_address: None,
                     follow_redirects: !official,
                 },
-                4 * 1024 * 1024,
+                limit,
                 Duration::from_secs(30),
                 &request.cancelled,
             ))

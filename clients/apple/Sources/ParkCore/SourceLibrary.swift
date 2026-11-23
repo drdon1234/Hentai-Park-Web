@@ -3,7 +3,7 @@ import Foundation
 
 /// 同一应用的窗口共用站点服务。资源文件与脚本均来自当前安装包。
 public final class SourceLibrary: BundledScripts, @unchecked Sendable {
-  private let resources: URL
+  let resources: URL
   private let cache: URL
   private let lock = NSLock()
   private var active: (directory: URL, proxy: String, service: SourceService)?
@@ -20,7 +20,7 @@ public final class SourceLibrary: BundledScripts, @unchecked Sendable {
     return try? Data(contentsOf: resources.appendingPathComponent(name))
   }
 
-  fileprivate func bundledSites() throws -> [(String, String)] {
+  func bundledSites() throws -> [(String, String)] {
     struct Entry: Decodable { let key: String; let name: String }
     struct Index: Decodable { let sources: [Entry] }
     let data = try Data(contentsOf: resources.appendingPathComponent("index.json"))
@@ -150,15 +150,9 @@ public struct DetailSearchTag: Hashable, Sendable, Decodable {
 
 extension ProgressSession {
   public func tagDictionary(source: String, locale: String) async throws -> SearchDictionary? {
-    let root = directory
-    return try await run { _, _ in
-      guard ["en","zh-Hans","zh-Hant","ru","ja","ko","ar","es"].contains(locale) else { return nil }
-      let folder = source.utf8.map { String(format: "%02x", $0) }.joined()
-      let file = root.appendingPathComponent("park/tag_translations").appendingPathComponent(folder)
-        .appendingPathComponent(locale + ".json")
-      guard let length = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-            length <= 8 * 1024 * 1024 else { return nil }
-      return try SearchDictionary(bytes: Data(contentsOf: file), source: source, locale: locale)
+    return try await run { store, _ in
+      guard let bytes = try store.installedDictionary(source: source, locale: locale) else { return nil }
+      return try SearchDictionary(bytes: bytes, source: source, locale: locale)
     }
   }
 

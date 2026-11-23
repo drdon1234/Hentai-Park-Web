@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "source": "av123",
+  "locale": "zh-Hans",
+  "version": "1.1.2",
+  "tags": {
+    "tag:yumi kazama": "风间由美",
+    "tag:sho nishino": "西野翔",
+    "tag:solowork": "单体作品"
+  },
+  "coverage": {
+    "scope": "真实详情与列表标签样本，非全站目录",
+    "complete": false,
+    "observed": 31,
+    "translated": 3,
+    "preserved": 0,
+    "unchanged": 0,
+    "unreviewed": 28
+  },
+  "provenance": [
+    {
+      "name": "HentaiPark",
+      "license": "AGPL-3.0-only",
+      "scope": "真实详情与列表标签样本，非全站目录",
+      "homepage": "https://123av.com"
+    }
+  ]
+}

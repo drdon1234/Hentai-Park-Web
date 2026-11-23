@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "source": "xiuren",
+  "locale": "zh-Hans",
+  "version": "1.1.2",
+  "tags": {
+    "xiuren": "秀人",
+    "xingyan": "星颜社",
+    "hot girl": "性感女孩",
+    "imiss": "爱蜜社",
+    "tag:xiuren": "秀人",
+    "mfstar": "模范学院",
+    "youmi": "尤蜜荟"
+  },
+  "coverage": {
+    "scope": "本次公开标签目录及详情样本；仅含已审校译文，不含全部专名",
+    "complete": false,
+    "observed": 1201,
+    "translated": 7,
+    "preserved": 0,
+    "unchanged": 0,
+    "unreviewed": 1194
+  },
+  "provenance": [
+    {
+      "name": "HentaiPark",
+      "license": "AGPL-3.0-only",
+      "scope": "本次公开标签目录及详情样本；仅含已审校译文，不含全部专名",
+      "homepage": "https://xiuren.biz"
+    }
+  ]
+}

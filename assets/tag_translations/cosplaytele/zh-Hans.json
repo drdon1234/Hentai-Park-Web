@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "source": "cosplaytele",
+  "locale": "zh-Hans",
+  "version": "1.1.1",
+  "tags": {
+    "honkai:star rail": "崩坏：星穹铁道",
+    "hot springs": "温泉",
+    "castorice": "遐蝶",
+    "furina": "芙宁娜",
+    "genshin impact": "原神",
+    "masturbation": "自慰",
+    "school girl": "女学生",
+    "wuthering waves": "鸣潮",
+    "cantarella": "坎特蕾拉",
+    "firefly": "流萤",
+    "chainsaw man": "电锯人",
+    "re:zero": "Re：从零开始的异世界生活",
+    "rem": "雷姆",
+    "sora kasugano": "春日野穹",
+    "yosuga no sora": "缘之空",
+    "tag:honkai:star rail": "崩坏：星穹铁道",
+    "tag:hot springs": "温泉",
+    "arknights": "明日方舟",
+    "azur lane": "碧蓝航线",
+    "blue archive": "蔚蓝档案",
+    "bunny girl": "兔女郎",
+    "collection": "合集",
+    "eula": "优菈",
+    "kakegurui": "狂赌之渊",
+    "nahida": "纳西妲",
+    "nazuna nanakusa": "七草荠",
+    "raiden shogun": "雷电将军",
+    "yofukashi no uta": "彻夜之歌",
+    "yoimiya": "宵宫",
+    "yumeko jabami": "蛇喰梦子"
+  },
+  "coverage": {
+    "scope": "本次公开标签目录及详情样本；仅含已审校译文，不含全部专名",
+    "complete": false,
+    "observed": 351,
+    "translated": 30,
+    "preserved": 0,
+    "unchanged": 0,
+    "unreviewed": 321
+  },
+  "provenance": [
+    {
+      "name": "HentaiPark",
+      "license": "AGPL-3.0-only",
+      "scope": "本次公开标签目录及详情样本；仅含已审校译文，不含全部专名",
+      "homepage": "https://cosplaytele.com"
+    }
+  ]
+}

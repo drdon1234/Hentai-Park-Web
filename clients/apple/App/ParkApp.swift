@@ -1034,6 +1034,7 @@ private struct AppleSettingsForm<Content: View>: View {
     let back: () -> Void
     @State private var categories = Set(appleCategoryOptions.map { $0.id })
     @State private var editProxy = false
+    @State private var dictionaries = false
     @State private var proxy = ""
     @State private var invalidProxy = false
 
@@ -1105,6 +1106,11 @@ private struct AppleSettingsForm<Content: View>: View {
                     Text("العربية").tag("ar")
                 }
             }
+            if session != nil, InstalledSources.library != nil {
+                Section(header: Text(access.tr("官方标签翻译包"))) {
+                    Button(access.tr("翻译包管理")) { dictionaries = true }
+                }
+            }
             Section(header: Text(access.tr("首页兴趣"))) {
                 ForEach(appleCategoryOptions) { option in
                     Toggle(access.tr(option.label), isOn: Binding(
@@ -1125,6 +1131,11 @@ private struct AppleSettingsForm<Content: View>: View {
             if access.failed { Text(access.tr("保存失败，请重试")) }
         }
         .disabled(access.busy)
+        .sheet(isPresented: $dictionaries) {
+            if let session, let library = InstalledSources.library {
+                AppleTagPacks(session: session, library: library, initialLocale: access.locale, tr: access.tr)
+            }
+        }
         .sheet(isPresented: $editProxy) {
             VStack(alignment: .leading, spacing: 12) {
                 Text(access.tr("HTTP 代理")).font(.headline)

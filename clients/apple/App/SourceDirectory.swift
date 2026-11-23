@@ -742,6 +742,7 @@ private enum DetailDestination: Hashable, Identifiable {
   @State private var relatedWork: SiteWork?
   @State private var destination: DetailDestination?
   @State private var dictionary: SearchDictionary?
+  @State private var dictionaryRevision = 0
   @State private var tagsExpanded = false
   @State private var playingGame = false
   @State private var browsingVoice = false
@@ -997,7 +998,13 @@ private enum DetailDestination: Hashable, Identifiable {
             }
           }.frame(maxWidth: .infinity, alignment: .leading).padding()
         }
-        .task(id: locale) { dictionary = try? await session.tagDictionary(source: site.key, locale: locale) }
+        .task(id: "\(site.key)/\(locale)/\(dictionaryRevision)") {
+          let result = try? await session.tagDictionary(source: site.key, locale: locale)
+          if !Task.isCancelled { dictionary = result }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tagPackChanged)) { notification in
+          if notification.object as? TagPackKey == TagPackKey(source: site.key, locale: locale) { dictionaryRevision += 1 }
+        }
         .task(id: imageAttempt) {
           guard let url = detail.cover ?? preview?.cover, !url.isEmpty else { return }
           imageFailed = false

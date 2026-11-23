@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "source": "tikporn",
+  "locale": "zh-Hans",
+  "version": "1.1.1",
+  "tags": {
+    "tag:female masturbation": "女性自慰",
+    "tag:brunette": "棕发女性",
+    "tag:shaved pussy": "剃毛阴部",
+    "tag:naked": "裸身",
+    "tag:tattoo porn": "纹身"
+  },
+  "coverage": {
+    "scope": "真实详情与列表标签样本，非全站目录",
+    "complete": false,
+    "observed": 5,
+    "translated": 5,
+    "preserved": 0,
+    "unchanged": 0,
+    "unreviewed": 0
+  },
+  "provenance": [
+    {
+      "name": "HentaiPark",
+      "license": "AGPL-3.0-only",
+      "scope": "真实详情与列表标签样本，非全站目录",
+      "homepage": "https://tik.porn/"
+    }
+  ]
+}

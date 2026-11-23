@@ -1,6 +1,7 @@
 pub mod backup;
 pub mod cookies;
 pub mod desktop;
+pub mod dictionaries;
 pub mod downloads;
 pub mod library;
 pub mod plugins;

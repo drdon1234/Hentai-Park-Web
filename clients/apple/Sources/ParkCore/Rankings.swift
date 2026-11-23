@@ -147,7 +147,7 @@ extension ProgressSession {
     let data = try JSONSerialization.data(withJSONObject: [chart.key, request])
     let raw = try await siteRead(library, site: chart.site.key, method: .ranking,
                                  arguments: String(decoding: data, as: UTF8.self), confirmation: confirmation)
-    return try await decodeSitePage(raw, site: chart.site, cursor: cursor)
+    return try await decodeSitePage(raw, source: chart.site.key, cursor: cursor)
   }
 }
 

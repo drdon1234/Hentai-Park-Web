@@ -1,3 +1,4 @@
+import CoreFoundation
 import Foundation
 
 /// 同一应用的窗口共用站点服务。资源文件与脚本均来自当前安装包。
@@ -62,6 +63,8 @@ public struct InstalledSite: Identifiable, Sendable {
   public let entryFeed: Feed?
   public let search: Bool?
   public let detail: Bool
+  public let comments: Bool
+  public let related: Bool
   public let nativeVideo: Bool
   public let unavailable: Bool?
   let rankings: Bool
@@ -80,6 +83,8 @@ public struct InstalledSite: Identifiable, Sendable {
     mediaType = site["type"] as? String
     search = site["search"] as? Bool
     detail = site["detail"] as? Bool == true
+    comments = site["comments"] as? Bool == true
+    related = site["related"] as? Bool == true
     nativeVideo = site["nativeVideo"] as? Bool == true
     unavailable = site["unavailable"] as? Bool
     rankings = site["rankings"] as? Bool == true
@@ -163,6 +168,9 @@ public struct SiteWork: Decodable, Identifiable, Sendable {
   public let title: String
   public let subtitle: String?
   public let description: String?
+  public fileprivate(set) var allowsComments = true
+  public fileprivate(set) var recommendations: [SiteWork] = []
+  public fileprivate(set) var commentURL: String?
   public let cover: String?
   private let tagGroups: [SiteWorkTag]?
   public var tags: [String]? { tagGroups?.flatMap(\.values) }
@@ -458,10 +466,10 @@ extension ProgressSession {
       decoding: try JSONSerialization.data(withJSONObject: args), as: UTF8.self)
     let raw = try await siteRead(
       library, site: site.key, method: method, arguments: arguments, confirmation: confirmation)
-    return try await decodeSitePage(raw, site: site, cursor: cursor)
+    return try await decodeSitePage(raw, source: site.key, cursor: cursor)
   }
 
-  func decodeSitePage(_ raw: String, site: InstalledSite, cursor: String?) async throws -> SiteWorkPage {
+  func decodeSitePage(_ raw: String, source sourceKey: String, cursor: String?) async throws -> SiteWorkPage {
     struct Cursor: Decodable {
       let value: String
       init(from decoder: Decoder) throws {
@@ -495,7 +503,7 @@ extension ProgressSession {
     }).map { fields -> SiteWork in
       let bytes = try JSONSerialization.data(withJSONObject: fields)
       var work = try JSONDecoder().decode(SiteWork.self, from: bytes)
-      work.listingSource = site.key
+      work.listingSource = sourceKey
       work.listingData = bytes
       return work
     }
@@ -548,6 +556,14 @@ extension ProgressSession {
     }
     var work = try JSONDecoder().decode(SiteWork.self, from: JSONSerialization.data(withJSONObject: fields))
     guard !work.title.isEmpty else { throw SiteReadError.malformed }
+    if let flag = fields["commentsAvailable"] as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() {
+      work.allowsComments = flag.boolValue
+    }
+    work.commentURL = fields["url"] as? String
+    if let related = fields["related"] as? [[String: Any]], !related.isEmpty {
+      let page = try JSONSerialization.data(withJSONObject: ["items": related])
+      work.recommendations = try await decodeSitePage(String(decoding: page, as: UTF8.self), source: site, cursor: nil).items
+    }
     if let blocks = fields["blocks"] as? [Any] {
       work.bodyData = try JSONSerialization.data(withJSONObject: blocks)
     }

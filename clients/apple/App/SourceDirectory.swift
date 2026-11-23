@@ -523,6 +523,7 @@ enum InstalledSources {
   @State private var progressAttempt = 0
   @State private var article: [SiteArticleBlock] = []
   @State private var selectedBlock: Int?
+  @State private var relatedWork: SiteWork?
   @State private var playingGame = false
   @State private var browsingVoice = false
   @State private var downloadSheet = false
@@ -656,6 +657,14 @@ enum InstalledSources {
                 }
               }
             }
+            if site.comments && detail.allowsComments {
+              DetailEntriesPanel(session: session, library: library, site: site, work: detail, kind: .comments,
+                tr: tr, select: { relatedWork = $0 })
+            }
+            if site.related || !detail.recommendations.isEmpty {
+              DetailEntriesPanel(session: session, library: library, site: site, work: detail, kind: .related,
+                tr: tr, select: { relatedWork = $0 })
+            }
           }.frame(maxWidth: .infinity, alignment: .leading).padding()
         }
         .task(id: imageAttempt) {
@@ -675,6 +684,9 @@ enum InstalledSources {
       } else {
         ProgressView()
       }
+    }.sheet(item: $relatedWork) { selected in
+      AnyView(SiteDetails(session: session, library: library, site: site, workId: selected.id, preview: selected,
+        locale: locale, incognito: incognito, tr: tr, close: { relatedWork = nil }).id(selected.id))
     }.task(id: attempt) {
       guard detail == nil else { return }
       problem = nil
@@ -697,5 +709,83 @@ enum InstalledSources {
         showLogin = false; attempt += 1
       })
     }
+  }
+}
+
+@MainActor private struct DetailEntriesPanel: View {
+  let session: ProgressSession
+  let library: SourceLibrary
+  let site: InstalledSite
+  let work: SiteWork
+  let kind: DetailSectionKind
+  let tr: (String) -> String
+  let select: (SiteWork) -> Void
+  @State private var open = false
+  @State private var entries: [DetailEntry] = []
+  @State private var nextPage: Int? = 1
+  @State private var cursor: PluginOptionValue?
+  @State private var attempt = 0
+  @State private var delivered: Int?
+  @State private var loading = false
+  @State private var problem: String?
+  @StateObject private var prompt = SitePrompt()
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Button(tr(kind == .comments ? "评论" : "相关作品")) { open.toggle() }
+      if open {
+        VStack(alignment: .leading, spacing: 8) {
+          ForEach(entries) { entry in
+            switch entry {
+            case .work(let row): Button(row.title) { select(row) }
+            case .comment(let row):
+              if let name = row.author?.name, !name.isEmpty { Text(name).font(.headline) }
+              ForEach(row.body.indices, id: \.self) { index in
+                let part = row.body[index]
+                if part.type == "image", let address = part.url {
+                  ArticlePicture(session: session, library: library, site: site.key, address: address,
+                    title: part.text ?? "", maximum: 1000, tr: tr)
+                } else if let text = part.text, !text.isEmpty { Text(text) }
+                else if part.type == "link", let address = part.url { Text(address) }
+              }
+            }
+          }
+          if loading { ProgressView() }
+          else if let problem {
+            Text(tr(problem))
+            Button(tr("重试")) { attempt += 1 }
+          } else if delivered != nil {
+            if entries.isEmpty { Text(tr(kind == .comments ? "暂无评论" : "暂无内容")) }
+            if nextPage != nil { Button(tr("加载更多")) { attempt += 1 } }
+          }
+        }.task(id: attempt) { await load() }
+      }
+    }.siteConfirmation(prompt, tr: tr)
+  }
+
+  private func load() async {
+    guard delivered != attempt, let page = nextPage else { return }
+    if kind == .related && delivered == nil {
+      var seen = Set<String>()
+      entries = work.recommendations.filter { seen.insert($0.id).inserted }.map(DetailEntry.work)
+      if !site.related { nextPage = nil; delivered = attempt; return }
+    }
+    loading = true
+    problem = nil
+    do {
+      let result = try await prompt.perform { consent in
+        try await session.detailEntries(library, site: site, work: work, section: kind, page: page,
+          cursor: cursor, confirmation: consent)
+      }
+      try Task.checkCancellation()
+      if result.reset { entries.removeAll() }
+      var seen = Set(entries.map(\.id))
+      let fresh = result.entries.filter { seen.insert($0.id).inserted }
+      entries.append(contentsOf: fresh)
+      nextPage = page > 1 && fresh.isEmpty && !result.entries.isEmpty ? nil : result.nextPage
+      cursor = result.cursor
+      delivered = attempt
+    } catch { if !Task.isCancelled { problem = siteMessage(error) } }
+    if !Task.isCancelled { loading = false }
   }
 }

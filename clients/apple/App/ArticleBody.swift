@@ -80,7 +80,7 @@ import ParkCore
   }
 }
 
-@MainActor private struct ArticlePicture: View {
+@MainActor struct ArticlePicture: View {
   let session: ProgressSession
   let library: SourceLibrary
   let site: String

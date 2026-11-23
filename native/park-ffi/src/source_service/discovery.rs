@@ -154,6 +154,8 @@ impl SourceService {
                     "reverseOnly":manifest["reverseSearchOnly"],
                     "search":manifest["capabilities"]["search"],
                     "detail":manifest["capabilities"]["detail"],
+                    "comments":manifest["capabilities"]["comments"],
+                    "related":manifest["capabilities"]["related"],
                     "nativeVideo":manifest["capabilities"]["videos"],
                     "metadataSearch":manifest["capabilities"]["metadataSearch"],
                     "metadataDetail":manifest["capabilities"]["metadataDetail"],

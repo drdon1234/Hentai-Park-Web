@@ -173,14 +173,17 @@ private extension View {
 }
 
 @MainActor struct ShelfControls: View {
+    private enum Panel: String, Identifiable {
+        case filters, categories, migration
+        var id: String { rawValue }
+    }
     @ObservedObject var options: ShelfOptions
     let session: ProgressSession
     let visible: [LibraryWork]
     let incognito: Bool
     let tr: (String) -> String
     let refresh: () -> Void
-    @State private var filters = false
-    @State private var classifying = false
+    @State private var panel: Panel?
     @State private var removing = false
     @State private var working = false
     @State private var failed = false
@@ -190,89 +193,102 @@ private extension View {
 
     private var targets: [LibraryWork] { visible.filter { options.selected.contains($0.libraryID) } }
     var body: some View {
-        Section {
+        VStack(alignment: .leading, spacing: 4) {
             if options.failed {
-                Button(tr("重试")) { Task { await options.refresh(session) } }
+                action("重试") { Task { await options.refresh(session) } }
             }
             if options.selecting {
-                Button(tr("取消选择")) { options.finishSelection() }
-                Button(tr("分类")) { name = ""; classifying = true }.disabled(targets.isEmpty)
-                Button(tr("迁移到其他站点")) { migration = targets }.disabled(targets.isEmpty)
-                Button(tr("标为已读")) { apply(.markRead) }.disabled(targets.isEmpty)
-                Button(tr("取消收藏")) { removing = true }.disabled(targets.isEmpty)
+                action("取消选择") { options.finishSelection() }
+                action("分类") { name = ""; panel = .categories }.disabled(targets.isEmpty)
+                action("迁移到其他站点") { migration = targets; panel = .migration }.disabled(targets.isEmpty)
+                action("标为已读") { apply(.markRead) }.disabled(targets.isEmpty)
+                action("取消收藏") { removing = true }.disabled(targets.isEmpty)
             } else {
-                Button(tr("筛选与排序")) { filters = true }
-                Button(tr("批量选择")) { options.selecting = true }
+                action("筛选与排序") { panel = .filters }
+                action("批量选择") { options.selecting = true }
             }
             if failed { Text(tr("保存失败，请重试")).foregroundColor(.secondary) }
             if !outcome.isEmpty { Text(outcome) }
         }
         .disabled(working)
-        .sheet(isPresented: Binding(get: { !migration.isEmpty }, set: { if !$0 { migration = [] } })) {
-            if let work = migration.first {
-                ShelfMigration(work: work, session: session, incognito: incognito, tr: tr,
-                    cancel: { migration = [] }, completed: { message in
-                        outcome = message
-                        migration.removeFirst()
-                        if migration.isEmpty { options.finishSelection() }
-                        refresh()
-                    }).id(work.libraryID)
+        .sheet(item: $panel, onDismiss: { migration = [] }) { sheet in
+            switch sheet {
+            case .filters: filterPanel
+            case .categories: categoryPanel
+            case .migration:
+                if let work = migration.first {
+                    ShelfMigration(work: work, session: session, incognito: incognito, tr: tr,
+                        cancel: { panel = nil }, completed: { message in
+                            outcome = message
+                            migration.removeFirst()
+                            if migration.isEmpty { options.finishSelection(); panel = nil }
+                            refresh()
+                        }).id(work.libraryID)
+                }
             }
-        }
-        .sheet(isPresented: $filters) {
-            VStack {
-                Form {
-                    TextField(tr("搜索"), text: $options.term)
-                    Picker(tr("分类"), selection: $options.category) {
-                        Text(tr("全部分类")).tag("")
-                        ForEach(options.categories, id: \.id) { Text($0.name).tag($0.name) }
-                    }
-                    Toggle(tr("有未读"), isOn: $options.unread)
-                    Toggle(tr("已下载"), isOn: $options.downloaded)
-                    Picker(tr("排序"), selection: $options.sort) {
-                        ForEach(["added","title","read","updated"], id: \.self) { key in
-                            Text(tr(["added":"添加时间","title":"标题","read":"最近阅读","updated":"最近更新"][key] ?? "")).tag(key)
-                        }
-                    }
-                    Toggle(tr("升序"), isOn: $options.ascending)
-                }
-                if failed { Text(tr("保存失败，请重试")) }
-                Button(tr("完成")) {
-                    working = true
-                    Task {
-                        defer { working = false }
-                        do {
-                            try await session.saveShelfOptions(sort: options.sort, ascending: options.ascending,
-                                unread: options.unread, downloaded: options.downloaded)
-                            failed = false; filters = false
-                        } catch { failed = true }
-                    }
-                }
-            }.padding().shelfSheetSize().disabled(working).interactiveDismissDisabled()
-        }
-        .sheet(isPresented: $classifying) {
-            VStack {
-                List(options.categories, id: \.id) { row in
-                    Button(row.name) { apply(.addCategory(id: row.id)) }
-                }
-                TextField(tr("新建分类"), text: $name)
-                Button(tr("新建分类")) {
-                    working = true
-                    Task {
-                        defer { working = false }
-                        do { try await session.createShelfCategory(name); await options.refresh(session); name = ""; failed = false }
-                        catch { failed = true }
-                    }
-                }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                if failed { Text(tr("保存失败，请重试")) }
-                Button(tr("取消")) { classifying = false }
-            }.padding().shelfSheetSize().disabled(working)
         }
         .alert(tr("取消收藏 {value0} 部作品？").replacingOccurrences(of: "{value0}", with: String(targets.count)),
                isPresented: $removing) {
             Button(tr("取消"), role: .cancel) {}
             Button(tr("取消收藏"), role: .destructive) { apply(.remove) }
         }
+    }
+
+    private func action(_ key: String, _ perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            Text(tr(key)).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6).contentShape(Rectangle())
+        }.buttonStyle(.borderless)
+    }
+
+    private var filterPanel: some View {
+        VStack {
+            Form {
+                TextField(tr("搜索"), text: $options.term)
+                Picker(tr("分类"), selection: $options.category) {
+                    Text(tr("全部分类")).tag("")
+                    ForEach(options.categories, id: \.id) { Text($0.name).tag($0.name) }
+                }
+                Toggle(tr("有未读"), isOn: $options.unread)
+                Toggle(tr("已下载"), isOn: $options.downloaded)
+                Picker(tr("排序"), selection: $options.sort) {
+                    ForEach(["added","title","read","updated"], id: \.self) { key in
+                        Text(tr(["added":"添加时间","title":"标题","read":"最近阅读","updated":"最近更新"][key] ?? "")).tag(key)
+                    }
+                }
+                Toggle(tr("升序"), isOn: $options.ascending)
+            }
+            if failed { Text(tr("保存失败，请重试")) }
+            Button(tr("完成")) {
+                working = true
+                Task {
+                    defer { working = false }
+                    do {
+                        try await session.saveShelfOptions(sort: options.sort, ascending: options.ascending,
+                            unread: options.unread, downloaded: options.downloaded)
+                        failed = false; panel = nil
+                    } catch { failed = true }
+                }
+            }
+        }.padding().shelfSheetSize().disabled(working).interactiveDismissDisabled()
+    }
+    private var categoryPanel: some View {
+        VStack {
+            List(options.categories, id: \.id) { row in
+                Button(row.name) { apply(.addCategory(id: row.id)) }
+            }
+            TextField(tr("新建分类"), text: $name)
+            Button(tr("新建分类")) {
+                working = true
+                Task {
+                    defer { working = false }
+                    do { try await session.createShelfCategory(name); await options.refresh(session); name = ""; failed = false }
+                    catch { failed = true }
+                }
+            }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            if failed { Text(tr("保存失败，请重试")) }
+            Button(tr("取消")) { panel = nil }
+        }.padding().shelfSheetSize().disabled(working)
     }
 
     private func apply(_ action: FavoriteEdit) {
@@ -284,7 +300,7 @@ private extension View {
             do {
                 try await session.editFavorites(selected, action: action)
                 failed = false
-                classifying = false
+                panel = nil
                 options.finishSelection()
                 refresh()
             } catch { failed = true }

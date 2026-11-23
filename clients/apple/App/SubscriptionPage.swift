@@ -12,6 +12,7 @@ import SwiftUI
   @State private var site: InstalledSite?
   @State private var hours = 6
   #if os(iOS)
+    @ObservedObject private var scheduler = SubscriptionScheduler.shared
     @State private var notifications = false
     @State private var preview = false
   #endif
@@ -45,6 +46,7 @@ import SwiftUI
                 }
               }.disabled(operation != nil)
               #if os(iOS)
+                if scheduler.schedulingFailed { Text(tr("系统未安排后台刷新，仍可手动检查订阅。")) }
                 Toggle(tr("订阅系统通知"), isOn: Binding(get: { notifications }, set: { value in
                   run {
                     if value {
@@ -159,7 +161,7 @@ import SwiftUI
       try await session.setSubscriptionHours(value)
       hours = value
       #if os(iOS)
-        try await SubscriptionScheduler.shared.schedule(hours: value)
+        await scheduler.schedule(hours: value)
       #endif
     }
   }

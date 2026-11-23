@@ -132,8 +132,7 @@ struct ParkApp: App {
             locked = settings.appLock == true
             privacy = settings
             #if os(iOS)
-            do { try await SubscriptionScheduler.shared.schedule(hours: settings.subscriptionHours) }
-            catch { failed = true }
+            await SubscriptionScheduler.shared.schedule(hours: settings.subscriptionHours)
             #endif
         } catch { if !Task.isCancelled { failed = true } }
     }
@@ -633,6 +632,10 @@ private final class LibraryModel: ObservableObject {
                                     Button(work.title) { destination = .work(work) }
                                 } else { Text(work.title) }
 
+                                if index == 2, !downloadSelection.selecting, work.source != "local", work.media != "bundle" {
+                                    Button(access.tr("作品详情")) { destination = .work(work) }
+                                        .buttonStyle(.borderless)
+                                }
                                 if index == 2, !downloadSelection.selecting, let state = work.downloadStatus, state != 3,
                                    !work.invalidDownload, work.pendingDeletion == nil, let session = model.session {
                                     let resume = state == 2 || state == 4

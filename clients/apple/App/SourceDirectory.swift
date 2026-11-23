@@ -483,6 +483,7 @@ enum InstalledSources {
       } else {
         VStack {
           Button(tr("返回"), action: back)
+          Text(work.title).font(.headline)
           if failed { Button(tr("站点加载失败，请重试")) { retry += 1 } } else { ProgressView() }
         }
       }

@@ -11,7 +11,7 @@ import SwiftUI
   @State private var selected = ""
   @State private var locale = ""
   @State private var available = [OfficialTagPack]()
-  @State private var localVersion: String?
+  @State private var localVersion: (key: TagPackKey, revision: Int, value: String?)?
   @State private var message: String?
   @State private var removing = false
   @State private var operation: Task<Void,Never>?
@@ -88,10 +88,12 @@ import SwiftUI
             }.disabled(installed)
           }
           if let entry = available.first(where: { $0.source == selected && $0.locale == locale }) {
-            Button(tr("从官方仓库下载更新")) {
+            let resolved = localVersion?.key == key && localVersion?.revision == revision
+            let current = resolved && ((localVersion?.value).map { entry.version.compare($0,options:.numeric) != .orderedDescending } ?? false)
+            Button(tr(current ? "翻译包已安装" : "从官方仓库下载更新")) {
               let target = key
               run { let index = try await refresh(); try await session.installTagPack(target,library:library,index:index); message = tr("翻译包已安装") }
-            }.disabled(localVersion.map { entry.version.compare($0,options:.numeric) != .orderedDescending } ?? false)
+            }.disabled(!resolved || current)
           }
           if inventory?.installed.contains(key) == true {
             Button(tr("移除词库"),role:.destructive) { removing = true }
@@ -112,7 +114,7 @@ import SwiftUI
     .task(id: "\(selected)/\(locale)/\(revision)") {
       let target = key; guard !target.source.isEmpty && !target.locale.isEmpty else { return }
       let version = try? await session.dictionaryVersion(target)
-      if !Task.isCancelled { localVersion = version }
+      if !Task.isCancelled { localVersion = (target,revision,version) }
     }
     .onChange(of:selected) { _ in normalize() }
     .onReceive(NotificationCenter.default.publisher(for: .tagPackChanged)) { _ in

@@ -12,7 +12,10 @@ struct Tag {
     order: Vec<u16>,
 }
 
-pub struct TagDictionary(Vec<Tag>);
+pub struct TagDictionary {
+    entries: Vec<Tag>,
+    version: [u64; 3],
+}
 
 impl TagDictionary {
     pub fn parse(bytes: &[u8], source: &str, locale: &str) -> Option<Self> {
@@ -65,14 +68,21 @@ impl TagDictionary {
                 order: format!("{scope}:{name}").encode_utf16().collect(),
             });
         }
-        Some(Self(entries))
+        Some(Self {
+            entries,
+            version: [version.major, version.minor, version.patch],
+        })
+    }
+
+    pub fn version(&self) -> [u64; 3] {
+        self.version
     }
 
     pub fn translation(&self, name: &str, namespace: &str) -> Option<&str> {
         let name = name.trim().to_lowercase();
         let namespace = namespace.trim().to_lowercase();
         let mut unscoped = None;
-        for tag in &self.0 {
+        for tag in &self.entries {
             if tag.name == name {
                 if tag.scope == namespace { return Some(&tag.translation); }
                 if tag.scope.is_empty() { unscoped = Some(tag.translation.as_str()); }
@@ -97,7 +107,7 @@ impl TagDictionary {
         }
         let (scope, term) = needle.split_once(':').unwrap_or(("", &needle));
         let mut ranked = Vec::new();
-        for tag in &self.0 {
+        for tag in &self.entries {
             if !scope.is_empty() && scope != tag.scope {
                 continue;
             }

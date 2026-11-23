@@ -95,47 +95,49 @@ pub fn inventory(root: &Path) -> Result<Value> {
         let entry = entry.map_err(|_| Error::Io)?;
         let name = entry.file_name();
         let Some(hex) = name.to_str() else { continue };
-        if hex.len() > 200 || hex.len() % 2 != 0 || !hex.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) { continue; }
-        let source: String = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i+2],16).unwrap() as char).collect();
-        if !valid_key(&source) { continue; }
-        let dir = directory(&base,hex,false)?;
+        if hex.len() > 200
+            || hex.len() % 2 != 0
+            || !hex
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
+            continue;
+        }
+        let source: String = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap() as char)
+            .collect();
+        if !valid_key(&source) {
+            continue;
+        }
+        let dir = directory(&base, hex, false)?;
         for language in CONTRACT["languages"].as_array().unwrap() {
             let locale = language["id"].as_str().unwrap();
             match fs::symlink_metadata(dir.join(format!("{locale}.json"))) {
-                Ok(m) if m.is_file() && !redirect(&m) => installed.push(json!({"source":source,"locale":locale})),
+                Ok(m) if m.is_file() && !redirect(&m) => {
+                    installed.push(json!({"source":source,"locale":locale}))
+                }
                 Ok(_) => return Err(Error::Invalid),
-                Err(e) if e.kind()==io::ErrorKind::NotFound => (),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => (),
                 Err(_) => return Err(Error::Io),
             }
         }
     }
     Ok(Value::Array(installed))
 }
-fn metadata(bytes: &[u8], source: &str, locale: &str) -> Result<Value> {
-    let doc: Value = serde_json::from_slice(bytes).map_err(|_| Error::Invalid)?;
-    if doc["source"] != source || doc["locale"] != locale || doc["schema"] != 1 {
-        return Err(Error::Invalid);
-    }
-    Ok(json!({"version":doc["version"],"provenance":doc["provenance"]}))
-}
 pub fn install(root: &Path, source: &str, locale: &str, bytes: &[u8]) -> Result<()> {
-    if park_domain::TagDictionary::parse(bytes, source, locale).is_none() {
-        return Err(Error::Invalid);
-    }
-    let info = metadata(bytes, source, locale)?;
+    let version = park_domain::TagDictionary::parse(bytes, source, locale)
+        .ok_or(Error::Invalid)?
+        .version();
     let _lock = gate(root, true).map_err(|_| Error::Io)?;
     let path = file(root, source, locale, true)?;
     if let Some(old) = read(&path)? {
-        let earlier = metadata(&old, source, locale)?;
-        fn version(info: &Value) -> Result<Vec<u64>> {
-            info["version"]
-                .as_str()
-                .ok_or(Error::Invalid)?
-                .split('.')
-                .map(|n| n.parse().map_err(|_| Error::Invalid))
-                .collect()
+        if old == bytes {
+            return Ok(());
         }
-        if version(&earlier)? > version(&info)? {
+        if park_domain::TagDictionary::parse(&old, source, locale)
+            .is_some_and(|previous| previous.version() > version)
+        {
             return Err(Error::Invalid);
         }
     }

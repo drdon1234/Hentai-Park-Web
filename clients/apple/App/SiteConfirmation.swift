@@ -8,6 +8,9 @@ func siteMessage(_ error: Error) -> String {
   case VisitResult.dismissed: return "已取消"
   case VisitResult.reviewed: return "请核对原站操作结果"
   case SourceFailure.LoginRequired: return "这个站点需要登录后才能浏览"
+  case SourceFailure.Cancelled, is CancellationError: return "请求已取消"
+  case SourceFailure.Storage: return "无法读取文件，请重试"
+  case SiteReadError.malformed, is DecodingError: return "站点返回了无效结果"
   default: return "站点加载失败，请重试"
   }
 }

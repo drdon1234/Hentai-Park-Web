@@ -876,33 +876,36 @@ private struct DetailSection<Content: View>: View {
               }
               if work.media == "comic", let first = work.chapters.first, !previews.isEmpty || previewHasNext {
                 DetailSection(title: tr("预览"), expanded: $previewsExpanded) {
-                  if previewsExpanded {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 82, maximum: 140))]) {
-                      ForEach(Array(previews.enumerated()), id: \.offset) { ordinal, item in
-                        let page = item.index.flatMap { $0 >= 0 ? $0 : nil } ?? ordinal
-                        Button {
-                          let target = work.chapters.first { $0.id == resumedChapter } ?? first
-                          previewPage = page
-                          chapter = ChapterKey(source: site.key, workId: work.workId, chapterId: target.id)
-                        } label: {
-                          VStack {
-                            DetailThumbnail(session: session, library: library, source: site.key, item: item)
-                            Text(String(UInt(page) + 1))
-                          }
-                        }.disabled(!progressReady)
-                        .accessibilityLabel(tr("第 {value0} 页").replacingOccurrences(of: "{value0}", with: String(UInt(page) + 1)))
+                  let tiles = ForEach(Array(previews.enumerated()), id: \.offset) { ordinal, item in
+                    let page = item.index.flatMap { $0 >= 0 ? $0 : nil } ?? ordinal
+                    Button {
+                      let target = work.chapters.first { $0.id == resumedChapter } ?? first
+                      previewPage = page
+                      chapter = ChapterKey(source: site.key, workId: work.workId, chapterId: target.id)
+                    } label: {
+                      VStack {
+                        DetailThumbnail(session: session, library: library, source: site.key, item: item)
+                        Text(String(UInt(page) + 1))
                       }
-                    }
-                    if previewHasNext {
-                      if let previewError { Text(tr(previewError)) }
-                      Button(tr(previewError == nil ? "加载更多预览" : "重试")) {
-                        previewAttempt += 1
-                      }.disabled(previewBusy)
-                      .task(id: previewAttempt) {
-                        guard previewAttempt != lastPreviewAttempt else { return }
-                        lastPreviewAttempt = previewAttempt
-                        await morePreviews(detail)
-                      }
+                    }.disabled(!progressReady)
+                    .accessibilityLabel(tr("第 {value0} 页").replacingOccurrences(of: "{value0}", with: String(UInt(page) + 1)))
+                  }
+                  #if os(macOS)
+                  ScrollView(.horizontal) {
+                    LazyHStack(alignment: .top, spacing: 8) { tiles }
+                  }.frame(height: 124)
+                  #else
+                  LazyVGrid(columns: [GridItem(.adaptive(minimum: 82, maximum: 140))]) { tiles }
+                  #endif
+                  if previewHasNext {
+                    if let previewError { Text(tr(previewError)) }
+                    Button(tr(previewError == nil ? "加载更多预览" : "重试")) {
+                      previewAttempt += 1
+                    }.disabled(previewBusy)
+                    .task(id: previewAttempt) {
+                      guard previewAttempt != lastPreviewAttempt else { return }
+                      lastPreviewAttempt = previewAttempt
+                      await morePreviews(detail)
                     }
                   }
                 }

@@ -173,6 +173,9 @@ struct ParkApp: App {
         failed = false
         defer { busy = false }
         do {
+            if name == "appLock", enabled, privacy?.appLock != true {
+                guard try await authenticateOwner() else { failed = true; return }
+            }
             let session = try await ProgressSession.openApplicationLibrary()
             do {
                 try await session.setPrivacyPreference(name, enabled: enabled)
@@ -208,6 +211,9 @@ struct ParkApp: App {
         failed = false
         defer { busy = false }
         do {
+            if appLock, privacy?.appLock != true {
+                guard try await authenticateOwner() else { failed = true; return }
+            }
             let session = try await ProgressSession.openApplicationLibrary()
             do {
                 try await session.completeOnboarding(categories: categories.sorted(), secureScreen: secureScreen, appLock: appLock)
@@ -216,17 +222,23 @@ struct ParkApp: App {
             await session.close()
         } catch { failed = true }
     }
+    private func authenticateOwner() async throws -> Bool {
+        let context = LAContext()
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) else { return false }
+        authentication = context
+        defer { if authentication === context { authentication = nil } }
+        let accepted = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: tr("验证身份以解锁 HentaiPark"))
+        return accepted && authentication === context && !Task.isCancelled
+    }
+
     func unlock() async {
         guard locked, !busy else { return }
-        let context = LAContext()
-        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) else { failed = true; return }
         failed = false
         busy = true
-        authentication = context
-        defer { if authentication === context { authentication = nil }; busy = false }
+        defer { busy = false }
         do {
-            let accepted = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: tr("验证身份以解锁 HentaiPark"))
-            if accepted && authentication === context { locked = false; away = nil }
+            if try await authenticateOwner() { locked = false; away = nil }
+            else { failed = true }
         } catch { failed = true }
     }
 }
@@ -845,7 +857,7 @@ private let appleCategoryOptions: [AppleCategoryOption] = [
                     let data = (try? JSONEncoder().encode(selected.sorted())) ?? Data("[]".utf8)
                     let json = String(data: data, encoding: .utf8) ?? "[]"
                     Task { await access.updatePreference("homeCategories", json: json) }
-                }.disabled(access.busy)
+                }.disabled(access.busy || categories.isEmpty)
             }
             if access.failed { Text(access.tr("保存失败，请重试")) }
         }
@@ -886,7 +898,7 @@ private let appleCategoryOptions: [AppleCategoryOption] = [
             Button(access.tr("完成设置")) {
                 let selected: Set<String> = categories.count == appleCategoryOptions.count ? [] : categories
                 Task { await access.finishOnboarding(categories: selected, secureScreen: secureScreen, appLock: appLock) }
-            }.disabled(access.busy)
+            }.disabled(access.busy || categories.isEmpty)
         }
         .disabled(access.busy)
         .onAppear {

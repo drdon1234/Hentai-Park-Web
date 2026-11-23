@@ -308,6 +308,7 @@ public struct SiteWork: Decodable, Identifiable, Sendable {
   fileprivate var listingData: Data?
   fileprivate var summary: Data?
   fileprivate var bodyData: Data?
+  fileprivate var subscriptionPost = false
 
   func listingField(_ name: String) -> Any? {
     guard let listingData, let row = try? JSONSerialization.jsonObject(with: listingData) as? [String: Any] else { return nil }
@@ -421,9 +422,10 @@ extension ProgressSession {
       let service = try library.service(directory: root, request: request)
       let raw = try service.sourceManifest(source: site.key, request: request)
       guard let manifest = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
-        let media = manifest["type"] as? String, let domain = manifest["category"] as? String,
+        let siteMedia = manifest["type"] as? String, let domain = manifest["category"] as? String,
         let capabilities = manifest["capabilities"] as? [String: Any]
       else { throw SiteReadError.malformed }
+      let media = item.subscriptionPost ? "article" : siteMedia
       let readable =
         (media == "novel" && capabilities["textChapter"] as? Bool == true)
         || (media == "comic" && capabilities["chapter"] as? Bool == true)
@@ -784,6 +786,10 @@ extension ProgressSession {
     for key in keys where fields[key] == nil || fields[key] is NSNull || fields[key] as? String == "" {
       fields[key] = prior[key]
     }
+    return try await decodeSiteDetail(fields, site: site, summaryKeys: keys)
+  }
+
+  private func decodeSiteDetail(_ fields: [String: Any], site: String, summaryKeys: Set<String>) async throws -> SiteWork {
     var work = try JSONDecoder().decode(SiteWork.self, from: JSONSerialization.data(withJSONObject: fields))
     guard !work.title.isEmpty else { throw SiteReadError.malformed }
     if let flag = fields["commentsAvailable"] as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() {
@@ -802,8 +808,35 @@ extension ProgressSession {
       work.bodyData = try JSONSerialization.data(withJSONObject: blocks)
     }
     work.summary = try JSONSerialization.data(
-      withJSONObject: fields.filter { keys.contains($0.key) && !($0.value is NSNull) })
+      withJSONObject: fields.filter { summaryKeys.contains($0.key) && !($0.value is NSNull) })
     return work
+  }
+
+  public func subscriptionPostPage(_ library: SourceLibrary, source: String, target: String, id: String,
+    cursor: String?, confirmation: ManualRead?) async throws -> (work: SiteWork?, next: String?) {
+    let page: [String: Any] = ["cursor": cursor.map { $0 as Any } ?? NSNull()]
+    let arguments = try JSONSerialization.data(withJSONObject: [target, page] as [Any])
+    let response = try await siteRead(library, site: source, method: .subscriptionPosts,
+      arguments: String(decoding: arguments, as: UTF8.self), confirmation: confirmation)
+    guard let batch = try JSONSerialization.jsonObject(with: Data(response.utf8)) as? [String: Any],
+      let items = batch["items"] as? [[String: Any]], let hasNext = batch["hasNext"] as? Bool
+    else { throw SiteReadError.malformed }
+    if var post = items.first(where: { $0["id"] as? String == id }) {
+      let text = post["text"] as? String ?? ""
+      if (post["title"] as? String)?.isEmpty != false {
+        post["title"] = text.split(separator: "\n").first.map { String($0.prefix(120)) } ?? id
+      }
+      var blocks: [[String: Any]] = text.isEmpty ? [] : [["type": "text", "text": text]]
+      blocks.append(contentsOf: post["media"] as? [[String: Any]] ?? [])
+      post["blocks"] = blocks
+      post["mediaKind"] = "article"
+      var work = try await decodeSiteDetail(post, site: source, summaryKeys: ["mediaKind", "cover"])
+      work.subscriptionPost = true
+      return (work, nil)
+    }
+    guard hasNext else { return (nil, nil) }
+    guard let next = batch["cursor"] as? String, !next.isEmpty else { throw SiteReadError.malformed }
+    return (nil, next)
   }
 
   public func siteTavernResource(_ library: SourceLibrary, site: String, item: SiteWork)

@@ -8,8 +8,13 @@ import SwiftUI
   let tr: (String) -> String
   let back: () -> Void
   @State private var data: SubscriptionUpdates?
-  @State private var destination: SubscriptionUpdates.Event?
-  @State private var site: InstalledSite?
+  private struct OpenedUpdate {
+    let event: SubscriptionUpdates.Event
+    let site: InstalledSite
+    let work: SiteWork
+  }
+  @State private var destination: OpenedUpdate?
+  @StateObject private var prompt = SitePrompt()
   @State private var hours = 6
   #if os(iOS)
     @ObservedObject private var scheduler = SubscriptionScheduler.shared
@@ -24,13 +29,14 @@ import SwiftUI
 
   var body: some View {
     Group {
-      if let event = destination, let site, let library = InstalledSources.library {
-        SiteDetails(session: session, library: library, site: site,
-                    workId: event.route.workId.isEmpty ? event.route.id : event.route.workId,
+      if let opened = destination, let library = InstalledSources.library {
+        SiteDetails(session: session, library: library, site: opened.site,
+                    workId: opened.work.id,
                     preview: nil, locale: locale, incognito: incognito, tr: tr,
-                    startChapter: event.route.chapterId) {
-          destination = nil
-        }.id(event.key)
+                    startChapter: opened.event.route.kind == "chapter" ? opened.event.route.chapterId : nil,
+                    openedDetail: opened.work, openedEvent: opened.event.unread ? opened.event.key : nil) {
+          destination = nil; retry += 1
+        }.id(opened.event.key)
       } else {
         VStack(alignment: .leading) {
           HStack {
@@ -89,12 +95,7 @@ import SwiftUI
               ForEach(data.events) { event in
                 Button {
                   run {
-                    guard let library = InstalledSources.library,
-                      let found = try await session.sites(library).first(where: { $0.key == event.source && $0.detail })
-                    else { throw SiteReadError.malformed }
-                    try await session.readSubscriptionEvent(event.key)
-                    site = found
-                    destination = event
+                    try await open(event)
                   }
                 } label: {
                   VStack(alignment: .leading) {
@@ -153,7 +154,34 @@ import SwiftUI
       Button(tr("取消"), role: .cancel) {}
       Button(tr("移除"), role: .destructive) { run { try await session.removeSubscription(target.id) } }
     } message: { target in Text(target.label) }
-    .onDisappear { operation?.cancel() }
+    .siteConfirmation(prompt, tr: tr).onDisappear { operation?.cancel() }
+  }
+
+  private func open(_ event: SubscriptionUpdates.Event) async throws {
+    guard let library = InstalledSources.library,
+          let site = try await session.installedSites(library).first(where: { $0.key == event.source })
+    else { throw SiteReadError.malformed }
+    let work: SiteWork
+    if event.route.kind == "post" {
+      let target = try await session.subscriptionPostTarget(event: event.key, source: site.key)
+      var visited = Set<String>()
+      var cursor: String?
+      while true {
+        let page = try await prompt.perform {
+          try await session.subscriptionPostPage(library, source: site.key, target: target, id: event.route.id,
+                                                  cursor: cursor, confirmation: $0)
+        }
+        if let found = page.work { work = found; break }
+        guard let next = page.next, visited.insert(next).inserted else { throw SiteReadError.malformed }
+        cursor = next
+      }
+    } else {
+      let id = event.route.kind == "chapter" ? event.route.workId : event.route.id
+      guard site.detail, !id.isEmpty else { throw SiteReadError.malformed }
+      work = try await prompt.perform { try await session.siteDetail(library, site: site.key, id: id, confirmation: $0) }
+    }
+    try Task.checkCancellation()
+    destination = OpenedUpdate(event: event, site: site, work: work)
   }
 
   private func setHours(_ value: Int) {

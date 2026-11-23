@@ -30,6 +30,12 @@ public struct SubscriptionUpdates: Decodable, Sendable {
 }
 
 extension ProgressSession {
+  public func subscriptionPostTarget(event: String, source: String) async throws -> String {
+    guard let target = try await run({ store, _ in try store.subscriptionPostTarget(key: event, source: source) })
+    else { throw SiteReadError.malformed }
+    return target
+  }
+
   public func setSubscriptionNotifications(_ enabled: Bool, preview: Bool) async throws {
     let name = preview ? "subscriptionNotificationPreview" : "subscriptionNotifications"
     try await run { store, _ in try store.savePreference(name: name, json: enabled ? "true" : "false") }

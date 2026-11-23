@@ -363,6 +363,17 @@ impl SourceService {
 }
 #[uniffi::export]
 impl ProgressStore {
+    pub fn subscription_post_target(&self, key: String, source: String) -> Result<Option<String>> {
+        use rusqlite::OptionalExtension;
+        self.lock().map_err(storage)?.query_row(
+            "SELECT s.target FROM subscription_event_targets t JOIN subscriptions s USING(identity)
+             JOIN subscription_events e USING(event_key)
+             WHERE t.event_key=?1 AND s.source=?2 AND e.source=s.source
+             ORDER BY s.created_at,s.identity LIMIT 1",
+            rusqlite::params![key, source], |row| row.get(0)
+        ).optional().map_err(storage)
+    }
+
     pub fn subscription_updates(&self) -> Result<String> {
         let mut db = self.lock().map_err(storage)?;
         sub::migrate(&mut db, &self.root).map_err(storage)?;

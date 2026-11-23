@@ -32,10 +32,12 @@ pub enum BrowseMethod {
     Thumbnails,
     Random,
     ResolveLink,
+    SubscriptionPosts,
 }
 impl BrowseMethod {
     fn protocol(&self) -> (&'static str, usize, usize) {
         match self {
+            Self::SubscriptionPosts => ("subscription.posts", 2, 2),
             Self::Feed => ("feed", 2, 2),
             Self::Search => ("search", 1, 1),
             Self::Detail => ("detail", 1, 2),

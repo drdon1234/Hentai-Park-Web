@@ -684,6 +684,9 @@ private struct FavoriteFolderSelection: View {
           if enabled { selected.insert(folder.id) } else { selected.remove(folder.id) }
         }))
       }
+      #if os(macOS)
+      .frame(minHeight: 96, idealHeight: CGFloat(min(max(folders.count, 1), 8) * 32 + 16))
+      #endif
       if failed { Text(tr("保存失败，请重试")) }
       HStack {
         Button(tr("取消"), action: cancel)
@@ -715,6 +718,8 @@ private enum DetailDestination: Hashable, Identifiable {
   let incognito: Bool
   let tr: (String) -> String
   var startChapter: String? = nil
+  var openedDetail: SiteWork? = nil
+  var openedEvent: String? = nil
   let close: () -> Void
   @State private var detail: SiteWork?
   @State private var work: LibraryWork?
@@ -1045,12 +1050,20 @@ private enum DetailDestination: Hashable, Identifiable {
       guard detail == nil else { return }
       problem = nil
       do {
-        let found = try await prompt.perform {
-          try await session.siteDetail(library, site: site.key, id: workId, preview: preview, confirmation: $0)
+        let found: SiteWork
+        if let openedDetail { found = openedDetail }
+        else {
+          found = try await prompt.perform {
+            try await session.siteDetail(library, site: site.key, id: workId, preview: preview, confirmation: $0)
+          }
         }
         let opened = try await session.openSiteWork(
           library, site: site, item: found, incognito: incognito)
         if opened.media == "article" { article = try found.articleBlocks() }
+        try Task.checkCancellation()
+        if let openedEvent, startChapter == nil || opened.chapters.contains(where: { $0.id == startChapter }) {
+          try await session.readSubscriptionEvent(openedEvent)
+        }
         work = opened
         previews = Array((found.thumbnails ?? []).prefix(20))
         previewHasNext = (found.thumbnails?.count ?? 0) > previews.count ||

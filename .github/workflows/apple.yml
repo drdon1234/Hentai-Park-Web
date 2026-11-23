@@ -191,11 +191,11 @@ jobs:
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
                                      "0e3abcefbcd1b06bc5a368998d30132d5028a20a61e6b603a71326fbc0dae678" if os.environ["EXERCISE_SCOPE"] == "setup" else
-                                     "7f0d52379b9aa96e98d086fa7a4b3849062054942c402c2325f06bc2318eb1a4" if os.environ["EXERCISE_SCOPE"] == "tavern" else
-                                     "7f744f4f7caa1737e01b8192c0394df5d1ece958cfeb260f5353af3b3898819e" if os.environ["EXERCISE_SCOPE"] == "pictures" else
-                                     "dc18e8f9e0e19857bfa28639ac237a2d13e0a6030c4dfffdef460f115f3e6709" if os.environ["EXERCISE_SCOPE"] == "reading" else
-                                     "dc18e8f9e0e19857bfa28639ac237a2d13e0a6030c4dfffdef460f115f3e6709" if os.environ["EXERCISE_SCOPE"] == "domain-recheck" else
-                                     "dc18e8f9e0e19857bfa28639ac237a2d13e0a6030c4dfffdef460f115f3e6709" if os.environ["EXERCISE_SCOPE"] == "domains" else
+                                     "475367db84909bfaabf91e57b1162548c87a3a0b26a15b1a17bc1c15d01b5b22" if os.environ["EXERCISE_SCOPE"] == "tavern" else
+                                     "8535b4c4f830e2fb788c2a47bb2cea6aca4d232d7f2c15f9ba1ad54d2eca7b5e" if os.environ["EXERCISE_SCOPE"] == "pictures" else
+                                     "fc8bfd244ad977ad7d0e7dcfc823dea17153dadf3e74c448e912d59072a23d27" if os.environ["EXERCISE_SCOPE"] == "reading" else
+                                     "fc8bfd244ad977ad7d0e7dcfc823dea17153dadf3e74c448e912d59072a23d27" if os.environ["EXERCISE_SCOPE"] == "domain-recheck" else
+                                     "fc8bfd244ad977ad7d0e7dcfc823dea17153dadf3e74c448e912d59072a23d27" if os.environ["EXERCISE_SCOPE"] == "domains" else
                                      "70c3f52c86028bc652e60116e08790b6b25934a71c6d925bcfbef6fb1c942f52" if os.environ["EXERCISE_SCOPE"] == "audio" else
                                      "df8ca23dcf7dcfcf6d5bd6add529461da9f87833b9cf56b0a3fad8f8cb1c30f9" if os.environ["EXERCISE_SCOPE"] == "game" else
                                      "9338f6a411b006f0056ac7f773a2eed4dccbd25a5b1b3f0c300b857d87b11fe3" if os.environ["EXERCISE_SCOPE"] == "movie" else

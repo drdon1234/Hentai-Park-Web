@@ -1,6 +1,11 @@
 import ParkCore
 import SwiftUI
 import ImageIO
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 extension Notification.Name {
   static let parkSiteOrderChanged = Notification.Name("ParkSiteOrderChanged")
@@ -548,6 +553,7 @@ enum InstalledSources {
   @State private var relatedWork: SiteWork?
   @State private var authorLink: String?
   @State private var detailSearch: DetailSearchTag?
+  @State private var dictionary: SearchDictionary?
   @State private var searchPresented = false
   @State private var domainSearch = false
   @State private var playingGame = false
@@ -603,6 +609,14 @@ enum InstalledSources {
     searchPresented = true
   }
 
+  private func tagRow(_ tag: DetailSearchTag, link: String? = nil) -> some View {
+    DetailTagRow(session: session, library: library, site: site, tag: tag, locale: locale,
+      localText: dictionary?.translation(name: tag.name, namespace: tag.namespace), tr: tr,
+      canOpen: link != nil || site.search == true) {
+        if let link { authorLink = link } else { searchDetail(tag) }
+      }
+  }
+
   private var details: some View {
     VStack(alignment: .leading) {
       Button(tr("返回"), action: close).padding(.horizontal)
@@ -637,19 +651,15 @@ enum InstalledSources {
             if let authors = detail.authors, !authors.isEmpty, !detail.searchTags.contains(where: { authors.contains($0.name) }) {
               Text(tr("作者")).font(.headline)
               ForEach(Array(authors.enumerated()), id: \.offset) { _, name in
-                if let link = detail.authorSearch?.url {
-                  Button(name) { authorLink = link }
-                } else if site.search == true {
-                  Button(name) { searchDetail(DetailSearchTag(name: name, keyword: detail.authorSearch?.keyword,
-                    filters: detail.authorSearch?.filters ?? [:])) }
-                } else { Text(name) }
+                let tag = DetailSearchTag(name: name, keyword: detail.authorSearch?.keyword,
+                  filters: detail.authorSearch?.filters ?? [:])
+                tagRow(tag, link: detail.authorSearch?.url)
               }
             }
             if !detail.searchTags.isEmpty {
               DisclosureGroup(tr("标签")) {
                 ForEach(Array(detail.searchTags.enumerated()), id: \.offset) { _, tag in
-                  if site.search == true { Button(tag.name) { searchDetail(tag) } }
-                  else { Text(tag.name) }
+                  tagRow(tag)
                 }
               }
             }
@@ -766,6 +776,7 @@ enum InstalledSources {
             }
           }.frame(maxWidth: .infinity, alignment: .leading).padding()
         }
+        .task(id: locale) { dictionary = try? await session.tagDictionary(source: site.key, locale: locale) }
         .task(id: imageAttempt) {
           guard let url = detail.cover ?? preview?.cover, !url.isEmpty else { return }
           imageFailed = false
@@ -850,6 +861,110 @@ enum InstalledSources {
       previewBatch += 1
       previewHasNext = batch.hasNext == true
     } catch { if !Task.isCancelled { previewError = siteMessage(error) } }
+  }
+}
+
+@MainActor private struct DetailTagRow: View {
+  let session: ProgressSession
+  let library: SourceLibrary
+  let site: InstalledSite
+  let tag: DetailSearchTag
+  let locale: String
+  let localText: String?
+  let tr: (String) -> String
+  let canOpen: Bool
+  let open: () -> Void
+  @State private var translating = false
+  @State private var result: String?
+  @State private var failed = false
+  @State private var attempt = 0
+  @State private var saving = false
+  @State private var status: String?
+
+  var body: some View {
+    VStack(alignment: .leading) {
+      HStack {
+        if canOpen { Button(localText ?? tag.name, action: open) }
+        else { Text(localText ?? tag.name) }
+        Menu { actions } label: {
+          Image(systemName: "ellipsis.circle")
+            .accessibilityLabel(tr("更多") + " · " + tag.name)
+        }.fixedSize()
+      }.contextMenu { actions }.disabled(saving)
+      if saving { ProgressView() }
+      if let status { Text(status).font(.caption) }
+    }.sheet(isPresented: $translating) {
+      VStack(alignment: .leading, spacing: 12) {
+        Text(tr("划词翻译")).font(.headline)
+        Text(tag.name).textSelection(.enabled)
+        if localText != nil { Text(tr("词库译文")).font(.caption) }
+        if let text = localText ?? result {
+          Text(text).textSelection(.enabled)
+          Button(tr("复制译文")) { copy(text) }
+        } else if failed {
+          Text(tr("翻译失败，请重试"))
+          Button(tr("重试")) { attempt += 1 }
+        } else { ProgressView() }
+        Button(tr("关闭")) { translating = false }.keyboardShortcut(.cancelAction)
+      }.padding().task(id: attempt) {
+        guard localText == nil else { return }
+        failed = false
+        do {
+          let text = try await session.translateTag(tag.name, locale: locale, library: library)
+          try Task.checkCancellation()
+          result = text
+        } catch { if !Task.isCancelled { failed = true } }
+      }
+    }
+  }
+
+  @ViewBuilder private var actions: some View {
+    Button(tr("复制")) {
+      copy(tag.name)
+      status = tr("已复制「{label}」").replacingOccurrences(of: "{label}", with: tag.name)
+    }
+    Button(tr("翻译")) { result = nil; failed = false; translating = true }
+    if site.subscriptionUpdates {
+      Button(tr("订阅此标签更新")) {
+        save {
+          try await session.subscribeToTag(tag, source: site.key, library: library)
+          status = tr("已添加更新订阅")
+          _ = try? await session.checkSubscriptions(library, force: true)
+        }
+      }
+    }
+    blockButton(tag.name, prompt: "屏蔽「{label}」")
+    if !tag.namespace.isEmpty {
+      blockButton(tag.namespace + ":" + tag.name, prompt: "仅屏蔽「{label}」")
+    }
+  }
+
+  private func blockButton(_ entry: String, prompt: String) -> some View {
+    Button(tr(prompt).replacingOccurrences(of: "{label}", with: entry)) {
+      save {
+        try await session.blockTag(entry)
+        status = tr("已屏蔽「{label}」，列表中将隐藏带有该标签的作品").replacingOccurrences(of: "{label}", with: entry)
+      }
+    }
+  }
+
+  private func save(_ operation: @escaping @MainActor () async throws -> Void) {
+    saving = true
+    status = nil
+    Task {
+      defer { saving = false }
+      do { try await operation() }
+      catch { if !Task.isCancelled { status = tr("保存失败，请重试") } }
+    }
+  }
+
+  private func copy(_ value: String) {
+    #if os(macOS)
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(value, forType: .string)
+    #else
+    UIPasteboard.general.string = value
+    #endif
   }
 }
 

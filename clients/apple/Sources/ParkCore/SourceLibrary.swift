@@ -66,6 +66,7 @@ public struct InstalledSite: Identifiable, Sendable {
   public let comments: Bool
   public let related: Bool
   public let thumbnails: Bool
+  public let subscriptionUpdates: Bool
   public let nativeVideo: Bool
   public let unavailable: Bool?
   let rankings: Bool
@@ -87,6 +88,7 @@ public struct InstalledSite: Identifiable, Sendable {
     comments = site["comments"] as? Bool == true
     related = site["related"] as? Bool == true
     thumbnails = site["thumbnails"] as? Bool == true
+    subscriptionUpdates = site["subscriptionUpdates"] as? Bool == true
     nativeVideo = site["nativeVideo"] as? Bool == true
     unavailable = site["unavailable"] as? Bool
     rankings = site["rankings"] as? Bool == true
@@ -109,6 +111,7 @@ public struct InstalledSite: Identifiable, Sendable {
 
 public struct DetailSearchTag: Hashable, Sendable, Decodable {
   public let name: String
+  public var namespace = ""
   public let keyword: String
   public let filters: [String: PluginOptionValue]
   private enum Keys: String, CodingKey { case name, keyword, filters }
@@ -128,6 +131,42 @@ public struct DetailSearchTag: Hashable, Sendable, Decodable {
         keyword: try values.decodeIfPresent(String.self, forKey: .keyword),
         filters: try values.decodeIfPresent([String: PluginOptionValue].self, forKey: .filters) ?? [:])
     }
+  }
+}
+
+extension ProgressSession {
+  public func tagDictionary(source: String, locale: String) async throws -> SearchDictionary? {
+    let root = directory
+    return try await run { _, _ in
+      guard ["en","zh-Hans","zh-Hant","ru","ja","ko","ar","es"].contains(locale) else { return nil }
+      let folder = source.utf8.map { String(format: "%02x", $0) }.joined()
+      let file = root.appendingPathComponent("park/tag_translations").appendingPathComponent(folder)
+        .appendingPathComponent(locale + ".json")
+      guard let length = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+            length <= 8 * 1024 * 1024 else { return nil }
+      return try SearchDictionary(bytes: Data(contentsOf: file), source: source, locale: locale)
+    }
+  }
+
+  public func translateTag(_ name: String, locale: String, library: SourceLibrary) async throws -> String {
+    let root = directory
+    let target = ["zh-Hans":"zh-CN","zh-Hant":"zh-TW"][locale] ?? locale
+    return try await run { _, request in
+      try library.service(directory: root, request: request).translateText(text: name, target: target, request: request)
+    }
+  }
+
+  public func blockTag(_ value: String) async throws {
+    try await run { store, _ in _ = try store.addBlockedTag(tag: value) }
+  }
+
+  public func subscribeToTag(_ tag: DetailSearchTag, source: String, library: SourceLibrary) async throws {
+    struct Filter: Encodable { let keyword: String; let filters: [String: PluginOptionValue] }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    let input = try encoder.encode(Filter(keyword: tag.keyword, filters: tag.filters))
+    _ = try await saveSubscription(library, original: nil, source: source, dimension: "filter",
+      input: String(decoding: input, as: UTF8.self), label: tag.name)
   }
 }
 
@@ -230,7 +269,13 @@ public struct SiteWork: Decodable, Identifiable, Sendable {
   public var tags: [String]? {
     tagGroups?.flatMap { group in group.entries.map { group.namespace.isEmpty ? $0.name : group.namespace + ":" + $0.name } }
   }
-  public var searchTags: [DetailSearchTag] { tagGroups?.flatMap(\.entries) ?? [] }
+  public var searchTags: [DetailSearchTag] {
+    tagGroups?.flatMap { group in group.entries.map { entry in
+      var tag = entry
+      tag.namespace = group.namespace
+      return tag
+    } } ?? []
+  }
   public let authors: [String]?
   public let authorSearch: AuthorSearch?
   public let workCode: String?

@@ -38,6 +38,9 @@ impl SearchDictionary {
     pub fn suggestions(&self, query: String) -> String {
         self.0.suggestions(&query).to_string()
     }
+    pub fn translation(&self, name: String, namespace: String) -> Option<String> {
+        self.0.translation(&name, &namespace).map(str::to_owned)
+    }
 }
 
 #[uniffi::export]

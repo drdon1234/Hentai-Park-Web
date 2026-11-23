@@ -178,6 +178,11 @@ impl ProgressStore {
         backup::set_preferences(&self.root, values)?;
         Ok(())
     }
+
+    pub fn add_blocked_tag(&self, tag: String) -> Result<Vec<String>, StorageError> {
+        let _gate = park_storage::recovery::gate(&self.root, true)?;
+        Ok(backup::add_blocked_tag(&self.root, tag)?)
+    }
 }
 
 impl ProgressStore {

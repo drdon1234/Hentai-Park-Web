@@ -42,6 +42,25 @@ pub fn set_preferences(root: &Path, values: impl IntoIterator<Item = (String, Va
     store_json(root, "settings.json", &current.into())
 }
 
+pub fn add_blocked_tag(root: &Path, tag: String) -> Result<Vec<String>> {
+    ready(root)?;
+    let mut settings = object(read_json(&root.join("settings.json"))?)?;
+    let mut tags = match settings.get("blockedTags") {
+        None => Vec::new(),
+        Some(value) => serde_json::from_value::<Vec<String>>(value.clone())?,
+    };
+    if !tags.contains(&tag) {
+        tags.push(tag);
+        let value = serde_json::to_value(&tags)?;
+        if !park_domain::settings::valid("blockedTags", &value) {
+            return Err(Error::Invalid);
+        }
+        settings.insert("blockedTags".into(), value);
+        store_json(root, "settings.json", &settings.into())?;
+    }
+    Ok(tags)
+}
+
 pub(super) fn persist(
     dir: &Path,
     timestamp: &str,

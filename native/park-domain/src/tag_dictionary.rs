@@ -68,6 +68,19 @@ impl TagDictionary {
         Some(Self(entries))
     }
 
+    pub fn translation(&self, name: &str, namespace: &str) -> Option<&str> {
+        let name = name.trim().to_lowercase();
+        let namespace = namespace.trim().to_lowercase();
+        let mut unscoped = None;
+        for tag in &self.0 {
+            if tag.name == name {
+                if tag.scope == namespace { return Some(&tag.translation); }
+                if tag.scope.is_empty() { unscoped = Some(tag.translation.as_str()); }
+            }
+        }
+        unscoped
+    }
+
     pub fn suggestions(&self, query: &str) -> Value {
         static LAST: LazyLock<regress::Regex> = LazyLock::new(|| {
             regress::Regex::with_flags(r#"(?:^|\s)-?((?:[a-z]+:)?(?:"[^"]*"?\$?|[^\s"]*))$"#, "i")

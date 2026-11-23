@@ -20,6 +20,7 @@ mod downloads;
 pub use downloads::DownloadBook;
 mod comic;
 mod novel;
+mod translation;
 pub(crate) use comic::RemoteChapter;
 mod discovery;
 mod manual_read;

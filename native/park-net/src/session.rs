@@ -13,6 +13,7 @@ pub enum Purpose {
     Media,
     ExternalImage,
     Repository,
+    Translation,
 }
 impl Purpose {
     pub(crate) fn credentials(self) -> bool {

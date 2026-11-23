@@ -165,6 +165,7 @@ impl SourceService {
                     "comments":manifest["capabilities"]["comments"],
                     "related":manifest["capabilities"]["related"],
                     "thumbnails":manifest["capabilities"]["thumbnails"],
+                    "subscriptionUpdates":manifest["capabilities"]["subscriptionUpdates"],
                     "nativeVideo":manifest["capabilities"]["videos"],
                     "metadataSearch":manifest["capabilities"]["metadataSearch"],
                     "metadataDetail":manifest["capabilities"]["metadataDetail"],

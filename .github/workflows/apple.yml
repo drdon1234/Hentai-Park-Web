@@ -201,8 +201,8 @@ jobs:
                                      "4f1ba6fa87736f5d3f04f6b2b69ad6016713d5acaec1e6795060908f1eae2c03" if os.environ["EXERCISE_SCOPE"] == "host-tags" else
                                      "fa50f9d3dfb7a9dafbda5c01781e87b72b0e528cc9ea2537266b595ad8a7ab97" if os.environ["EXERCISE_SCOPE"] == "host-directory" else
                                      "c615d249a495dcb8bae86f840a876d91cdaadfd111ac7104e7c2c711160aec05" if os.environ["EXERCISE_SCOPE"] == "host-update-route" else
-                                     "8a44bb714c71e566432e97b4246aa3032ca18269b1ef930be20cda2403bfcce0" if os.environ["EXERCISE_SCOPE"] == "host-update-management" else
-                                     "d9f73f44fee7d01d51f0778469dbf82da4936649ad6ad13ad3f37af6eddc3d6d" if os.environ["EXERCISE_SCOPE"] == "host-chapter-actions" else
+                                     "b8ee69930e857826b6f09a0be96e3062a91f0b48d7aeab7e1031685a78588996" if os.environ["EXERCISE_SCOPE"] == "host-update-management" else
+                                     "099d297210eee3263b2fc89689d443541c9f473b9c47c1349bd583aef6798098" if os.environ["EXERCISE_SCOPE"] == "host-chapter-actions" else
                                      "70b3b3473947450a96a533fbf7ff621ca2152cd56f31784fe865fa21a0040b00" if os.environ["EXERCISE_SCOPE"] == "host-favorites" else
                                      "5eefb4f4470a4af95acad553b145bb43a8e9384bfd6e2df3cc23f1e043694a72" if os.environ["EXERCISE_SCOPE"] == "host-metadata" else
                                      "d6308468e3dbe604f9c0d9cfcf94ea375619cd0a9a968aae9e5023a89dec4d61" if os.environ["EXERCISE_SCOPE"] == "host-actions" else

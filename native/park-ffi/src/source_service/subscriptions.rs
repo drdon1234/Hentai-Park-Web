@@ -363,6 +363,19 @@ impl SourceService {
 }
 #[uniffi::export]
 impl ProgressStore {
+    pub fn subscription_event_page(&self, after_time: Option<i64>, after_key: String, limit: u32) -> Result<String> {
+        let mut db = self.lock().map_err(storage)?;
+        sub::migrate(&mut db, &self.root).map_err(storage)?;
+        let events = sub::event_page(&db, after_time, &after_key, limit).map_err(storage)?;
+        Ok(Value::Array(events).to_string())
+    }
+
+    pub fn subscription_targets(&self) -> Result<String> {
+        let mut db = self.lock().map_err(storage)?;
+        sub::migrate(&mut db, &self.root).map_err(storage)?;
+        Ok(Value::Array(sub::target_view(&db).map_err(storage)?).to_string())
+    }
+
     pub fn subscription_post_target(&self, key: String, source: String) -> Result<Option<String>> {
         use rusqlite::OptionalExtension;
         self.lock().map_err(storage)?.query_row(
@@ -397,6 +410,22 @@ impl ProgressStore {
                 [key],
             )
             .map_err(storage)?;
+        Ok(())
+    }
+    pub fn read_all_subscription_events(&self) -> Result<()> {
+        self.lock().map_err(storage)?.execute(
+            "UPDATE subscription_events SET unread=0 WHERE unread=1", []
+        ).map_err(storage)?;
+        Ok(())
+    }
+
+    pub fn remove_subscription_events(&self, key: Option<String>) -> Result<()> {
+        let db = self.lock().map_err(storage)?;
+        if let Some(key) = key {
+            db.execute("DELETE FROM subscription_events WHERE event_key=?", [key]).map_err(storage)?;
+        } else {
+            db.execute("DELETE FROM subscription_events", []).map_err(storage)?;
+        }
         Ok(())
     }
     pub fn claim_subscription_notification(&self) -> Result<Option<String>> {

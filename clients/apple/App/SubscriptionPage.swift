@@ -23,6 +23,9 @@ import SwiftUI
   #endif
   @State private var editor: SubscriptionDraft?
   @State private var removing: SubscriptionUpdates.Target?
+  @State private var deletingEvent: SubscriptionUpdates.Event?
+  @State private var clearingEvents = false
+  @State private var pageStarts: [SubscriptionUpdates.Event] = []
   @State private var retry = 0
   @State private var operation: Task<Void, Never>?
   @State private var status: String?
@@ -92,7 +95,14 @@ import SwiftUI
                 }
               }
               if data.events.isEmpty { Text(tr("暂无订阅更新")) }
-              ForEach(data.events) { event in
+              if !data.events.isEmpty {
+                Menu(tr("管理")) {
+                  Button(tr("全部标为已读")) { run { try await session.readAllSubscriptionEvents() } }
+                  Button(tr("清空订阅更新"), role: .destructive) { clearingEvents = true }
+                }.disabled(operation != nil)
+              }
+              ForEach(Array(data.events.prefix(100))) { event in
+                HStack {
                 Button {
                   run {
                     try await open(event)
@@ -102,7 +112,23 @@ import SwiftUI
                     Text(event.title)
                     Text(tr(event.unread ? "未读" : "已读")).font(.caption)
                   }
-                }.disabled(operation != nil)
+                }.buttonStyle(.borderless).disabled(operation != nil)
+                Spacer()
+                Button(role: .destructive) { deletingEvent = event } label: {
+                  Image(systemName: "trash")
+                }.accessibilityLabel(tr("删除订阅更新") + " " + event.title)
+                 .buttonStyle(.borderless).disabled(operation != nil)
+                }
+              }
+              if !pageStarts.isEmpty || data.events.count > 100 {
+                HStack {
+                  if !pageStarts.isEmpty {
+                    Button(tr("上一页")) { run { _ = pageStarts.popLast() } }
+                  }
+                  if data.events.count > 100 {
+                    Button(tr("下一页")) { run { pageStarts.append(data.events[99]) } }
+                  }
+                }.buttonStyle(.borderless).disabled(operation != nil)
               }
               Section(header: Text(tr("订阅状态"))) {
                 Button(tr("添加订阅")) { editor = SubscriptionDraft(original: nil) }
@@ -142,7 +168,7 @@ import SwiftUI
           notifications = settings.subscriptionNotifications == true
           preview = settings.subscriptionNotificationPreview == true
         #endif
-        data = try await session.subscriptionUpdates()
+        data = try await session.subscriptionUpdates(after: pageStarts.last)
       } catch { if !Task.isCancelled { status = "加载失败" } }
     }.sheet(item: $editor) { draft in
       SubscriptionEditor(session: session, original: draft.original, locale: locale, tr: tr) {
@@ -154,6 +180,22 @@ import SwiftUI
       Button(tr("取消"), role: .cancel) {}
       Button(tr("移除"), role: .destructive) { run { try await session.removeSubscription(target.id) } }
     } message: { target in Text(target.label) }
+    .alert(tr("删除订阅更新"), isPresented: Binding(get: { deletingEvent != nil }, set: { if !$0 { deletingEvent=nil } }),
+           presenting: deletingEvent) { event in
+      Button(tr("取消"), role: .cancel) {}
+      Button(tr("删除"), role: .destructive) {
+        run {
+          try await session.removeSubscriptionEvents(event.key)
+          if data?.events.count == 1 { _ = pageStarts.popLast() }
+        }
+      }
+    } message: { Text($0.title) }
+    .alert(tr("清空订阅更新"), isPresented: $clearingEvents) {
+      Button(tr("取消"), role: .cancel) {}
+      Button(tr("清空"), role: .destructive) {
+        run { try await session.removeSubscriptionEvents(nil); pageStarts.removeAll() }
+      }
+    } message: { Text(tr("仅删除更新记录，保留订阅和已检查状态，不会重复推送已发现的内容。")) }
     .siteConfirmation(prompt, tr: tr).onDisappear { operation?.cancel() }
   }
 
@@ -201,7 +243,7 @@ import SwiftUI
       defer { operation = nil }
       do {
         try await action()
-        data = try await session.subscriptionUpdates()
+        data = try await session.subscriptionUpdates(after: pageStarts.last)
       } catch { if !Task.isCancelled { status = "加载失败" } }
     }
   }

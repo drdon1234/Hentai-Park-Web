@@ -22,6 +22,7 @@ public struct SubscriptionUpdates: Decodable, Sendable {
     public let title: String
     public let source: String
     public let unread: Bool
+    public let createdAt: Int64
     public let route: Route
     public var id: String { key }
   }
@@ -108,10 +109,21 @@ extension ProgressSession {
     try await run { store, _ in try store.removeSubscription(id: id) }
   }
 
-  public func subscriptionUpdates() async throws -> SubscriptionUpdates {
+  public func subscriptionUpdates(after: SubscriptionUpdates.Event? = nil) async throws -> SubscriptionUpdates {
     try await run { store, _ in
-      try JSONDecoder().decode(SubscriptionUpdates.self, from: Data(store.subscriptionUpdates().utf8))
+      let targets = try JSONDecoder().decode([SubscriptionUpdates.Target].self, from: Data(store.subscriptionTargets().utf8))
+      let events = try JSONDecoder().decode([SubscriptionUpdates.Event].self, from: Data(
+        store.subscriptionEventPage(afterTime: after?.createdAt, afterKey: after?.key ?? "", limit: 101).utf8))
+      return SubscriptionUpdates(targets: targets, events: events)
     }
+  }
+
+  public func readAllSubscriptionEvents() async throws {
+    try await run { store, _ in try store.readAllSubscriptionEvents() }
+  }
+
+  public func removeSubscriptionEvents(_ key: String?) async throws {
+    try await run { store, _ in try store.removeSubscriptionEvents(key: key) }
   }
 
   public func readSubscriptionEvent(_ id: String) async throws {

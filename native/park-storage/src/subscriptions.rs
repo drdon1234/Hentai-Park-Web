@@ -187,12 +187,30 @@ pub fn fail(db: &Connection, id: &str, lease: &str, now: i64, code: &str) -> Res
     db.execute("UPDATE subscription_checks SET failures=failures+1,error_code=?3,next_due=?4+(60000 << min(8,failures+1)),lease_owner='',lease_until=0 WHERE identity=?1 AND lease_owner=?2",params![id,lease,code,now])?;
     Ok(())
 }
-pub fn view(db: &Connection) -> Result<Value> {
+pub fn target_view(db: &Connection) -> Result<Vec<Value>> {
     let mut q=db.prepare("SELECT identity,source,label,enabled,error_code,dimension,target,notify FROM subscriptions JOIN subscription_checks USING(identity) ORDER BY created_at,identity")?;
     let targets=q.query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"source":r.get::<_,String>(1)?,"label":r.get::<_,String>(2)?,"enabled":r.get::<_,bool>(3)?,"error":r.get::<_,String>(4)?,"dimension":r.get::<_,String>(5)?,"target":r.get::<_,String>(6)?,"notify":r.get::<_,bool>(7)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut q=db.prepare("SELECT event_key,title,unread,source,route FROM subscription_events ORDER BY created_at DESC,event_key LIMIT 500")?;
-    let events=q.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,bool>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))?.map(|row|{let(k,title,unread,source,raw)=row?;Ok(json!({"key":k,"title":title,"unread":unread,"source":source,"route":serde_json::from_str::<Item>(&raw)?}))}).collect::<Result<Vec<_>>>()?;
-    Ok(json!({"targets":targets,"events":events}))
+    Ok(targets)
+}
+pub fn view(db: &Connection) -> Result<Value> {
+    Ok(json!({"targets":target_view(db)?, "events":event_page(db, None, "", 500)?}))
+}
+
+pub fn event_page(db: &Connection, after_time: Option<i64>, after_key: &str, limit: u32) -> Result<Vec<Value>> {
+    let mut query = db.prepare(
+        "SELECT event_key,title,unread,source,route,created_at FROM subscription_events
+         WHERE ?1 IS NULL OR created_at < ?1 OR (created_at = ?1 AND event_key > ?2)
+         ORDER BY created_at DESC,event_key LIMIT ?3"
+    )?;
+    let rows = query.query_map(params![after_time, after_key, limit.clamp(1, 500)], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, bool>(2)?,
+            row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, i64>(5)?))
+    })?;
+    rows.map(|row| {
+        let (key, title, unread, source, raw, created) = row?;
+        Ok(json!({"key":key, "title":title, "unread":unread, "source":source,
+                  "route":serde_json::from_str::<Item>(&raw)?, "createdAt":created}))
+    }).collect()
 }
 pub fn claim_notification(db: &Connection, now: i64) -> Result<Option<Value>> {
     Ok(db.query_row("UPDATE subscription_events SET next_attempt=?1+300000 WHERE event_key=(SELECT e.event_key FROM subscription_events e WHERE delivered=0 AND notify=1 AND next_attempt<=?1 AND EXISTS(SELECT 1 FROM subscription_event_targets t JOIN subscriptions s USING(identity) WHERE t.event_key=e.event_key AND s.enabled=1 AND s.notify=1) ORDER BY created_at,event_key LIMIT 1) RETURNING event_key,title,notification_id,next_attempt",[now],|r|Ok(json!({"key":r.get::<_,String>(0)?,"title":r.get::<_,String>(1)?,"id":r.get::<_,i32>(2)?,"claim":r.get::<_,i64>(3)?}))).optional()?)

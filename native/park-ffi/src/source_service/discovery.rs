@@ -27,6 +27,9 @@ pub enum BrowseMethod {
     FilterOptions,
     SearchSuggestions,
     VoiceDirectory,
+    ResolveContentLink,
+    SearchLink,
+    Thumbnails,
 }
 impl BrowseMethod {
     fn protocol(&self) -> (&'static str, usize, usize) {
@@ -43,6 +46,9 @@ impl BrowseMethod {
             Self::FilterOptions => ("filterOptions", 1, 1),
             Self::SearchSuggestions => ("searchSuggestions", 1, 2),
             Self::VoiceDirectory => ("voiceDirectory", 3, 3),
+            Self::ResolveContentLink => ("resolveContentLink", 1, 1),
+            Self::SearchLink => ("searchLink", 2, 2),
+            Self::Thumbnails => ("thumbnails", 2, 2),
         }
     }
 }

@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-shelf, migration, domain-recheck]
+        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-shelf, mac-setup, migration, domain-recheck]
         default: full
 permissions:
   contents: read
@@ -156,7 +156,7 @@ jobs:
       fail-fast: false
       matrix:
         include: >-
-          ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record","mac-shelf"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
+          ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record","mac-shelf","mac-setup"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
           || inputs.scope == 'media' && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'audio' && '[{"host":"iPhone","runtime":"18.6"}]'
           || inputs.scope == 'domain-recheck' && '[{"host":"iPhone","runtime":"18.6"}]'
@@ -195,6 +195,7 @@ jobs:
                                      "a5f116eb140f55631adb3d57aadbeda6650233cea4f8c97f8bb9a8af312645f1" if os.environ["EXERCISE_SCOPE"] == "collection" else
                                      "1bfe6d5e20fe67ea1b27b9f89144d4ca0c1c020bb1f6a889cb948f3028edf33c" if os.environ["EXERCISE_SCOPE"] == "migration" else
                                      "607f52ef318e4d4978ce4e458b8da5e4ee2f85e71e64cf284ee4bd9ade234532" if os.environ["EXERCISE_SCOPE"] == "mac-shelf" else
+                                     "0047cf24a554b81a84f574336dfae7d5f3fffd066ba483ac43032cc95e29c354" if os.environ["EXERCISE_SCOPE"] == "mac-setup" else
                                      "7de5019a14486a5a2ea7fe219715d49bc337500ed18098d7d221e4cc28c3982f" if os.environ["EXERCISE_SCOPE"] == "tavern" else
                                      "3ba92b344d3f1a2cbe80132e7ec94f54af3bfb64e774b9bbbec6396edb295375" if os.environ["EXERCISE_SCOPE"] == "pictures" else
                                      "766f7eb35c7a8237a2204a2488ae96213d47ff22f4bc724b909f6dafd96ddced" if os.environ["EXERCISE_SCOPE"] == "reading" else

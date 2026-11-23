@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-domains, mac-shelf, mac-setup, migration, download-actions, discovery-scope, full-history, download-entry, shelf-display, detail-sections, host-actions, host-tags, host-directory, host-metadata, host-preview, host-preview-mac, storage, domain-recheck]
+        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-domains, mac-shelf, mac-setup, migration, download-actions, discovery-scope, full-history, download-entry, shelf-display, detail-sections, host-actions, host-tags, host-directory, host-metadata, host-favorites, host-preview, host-preview-mac, storage, domain-recheck]
         default: full
 permissions:
   contents: read
@@ -157,7 +157,7 @@ jobs:
       matrix:
         include: >-
           ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record","mac-domains","mac-shelf","mac-setup","host-preview-mac"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
-          || contains(fromJSON('["media","download-actions","discovery-scope","migration","full-history","download-entry","shelf-display","detail-sections","host-actions","host-tags","host-directory","host-metadata","host-preview","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
+          || contains(fromJSON('["media","download-actions","discovery-scope","migration","full-history","download-entry","shelf-display","detail-sections","host-actions","host-tags","host-directory","host-metadata","host-favorites","host-preview","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'audio' && '[{"host":"iPhone","runtime":"18.6"}]'
           || inputs.scope == 'domain-recheck' && '[{"host":"iPhone","runtime":"18.6"}]'
           || contains(fromJSON('["movie","domains","reading","pictures","tavern","setup","shelf","collection","game"]'), inputs.scope) && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
@@ -198,6 +198,7 @@ jobs:
                                      "ffe771be9e821a3e6e75d960d54f1c9fa81d5a5dd5c57064aa926d649f4f1128" if os.environ["EXERCISE_SCOPE"] == "host-preview" else
                                      "e24e77295f6ed8586f417471c19aff7d97d75a35a8cd5c63089f842cd53434ce" if os.environ["EXERCISE_SCOPE"] == "host-tags" else
                                      "fa50f9d3dfb7a9dafbda5c01781e87b72b0e528cc9ea2537266b595ad8a7ab97" if os.environ["EXERCISE_SCOPE"] == "host-directory" else
+                                     "0811bbf5f9a976cac3ed4251ab5515885567a665b068fe5c84128e75f6ec584a" if os.environ["EXERCISE_SCOPE"] == "host-favorites" else
                                      "5eefb4f4470a4af95acad553b145bb43a8e9384bfd6e2df3cc23f1e043694a72" if os.environ["EXERCISE_SCOPE"] == "host-metadata" else
                                      "d6308468e3dbe604f9c0d9cfcf94ea375619cd0a9a968aae9e5023a89dec4d61" if os.environ["EXERCISE_SCOPE"] == "host-actions" else
                                      "fdaf167c7839870c77b0c2efcb178adf5eef6ff3d3c0831c35c015a33f7b05d3" if os.environ["EXERCISE_SCOPE"] == "detail-sections" else

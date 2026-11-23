@@ -66,6 +66,8 @@ public struct InstalledSite: Identifiable, Sendable {
   public let comments: Bool
   public let related: Bool
   public let thumbnails: Bool
+  public let random: Bool
+  fileprivate let resolveLink: Bool
   public let subscriptionUpdates: Bool
   public let nativeVideo: Bool
   public let unavailable: Bool?
@@ -88,6 +90,8 @@ public struct InstalledSite: Identifiable, Sendable {
     comments = site["comments"] as? Bool == true
     related = site["related"] as? Bool == true
     thumbnails = site["thumbnails"] as? Bool == true
+    random = site["random"] as? Bool == true
+    resolveLink = site["resolveLink"] as? Bool == true
     subscriptionUpdates = site["subscriptionUpdates"] as? Bool == true
     nativeVideo = site["nativeVideo"] as? Bool == true
     unavailable = site["unavailable"] as? Bool
@@ -608,6 +612,31 @@ extension ProgressSession {
       }
     }
     return .external(url)
+  }
+
+  private func checkedReference(_ value: String) throws -> String {
+    guard !value.isEmpty, value.count <= 4096, !value.unicodeScalars.contains(where: { $0.value < 32 })
+    else { throw SiteReadError.malformed }
+    return value
+  }
+
+  public func randomReference(_ library: SourceLibrary, site: InstalledSite,
+    confirmation: ManualRead? = nil) async throws -> String {
+    guard site.random else { throw SiteReadError.malformed }
+    let raw = try await siteRead(library, site: site.key, method: .random, arguments: "[{}]", confirmation: confirmation)
+    let data = Data(raw.utf8)
+    let id: String
+    if let text = try? JSONDecoder().decode(String.self, from: data) { id = text }
+    else { id = String(try JSONDecoder().decode(Int64.self, from: data)) }
+    return try checkedReference(id)
+  }
+
+  public func resolveWorkReference(_ library: SourceLibrary, site: InstalledSite, reference: String,
+    confirmation: ManualRead? = nil) async throws -> String {
+    guard site.resolveLink else { return reference }
+    let args = String(decoding: try JSONEncoder().encode([reference]), as: UTF8.self)
+    let target = try await siteRead(library, site: site.key, method: .resolveLink, arguments: args, confirmation: confirmation)
+    return try checkedReference(JSONDecoder().decode(String.self, from: Data(target.utf8)))
   }
 
   public func sitePage(

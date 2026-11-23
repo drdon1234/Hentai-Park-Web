@@ -301,6 +301,10 @@ enum InstalledSources {
   @State private var keyword = ""
   @State private var works: [SiteWork] = []
   @State private var selected: SiteWork?
+  @State private var randomTarget: String?
+  @State private var randomRequest: UUID?
+  @State private var randomError: String?
+  @StateObject private var randomPrompt = SitePrompt()
   @State private var page = 1
   @State private var cursor: String?
   @State private var next = false
@@ -338,11 +342,11 @@ enum InstalledSources {
 
   var body: some View {
     Group {
-      if let selected {
+      if let target = selected?.id ?? randomTarget {
         SiteDetails(
-          session: session, library: library, site: site, workId: selected.id,
+          session: session, library: library, site: site, workId: target,
           preview: selected, locale: locale, incognito: incognito, tr: tr
-        ) { self.selected = nil }.id(selected.id)
+        ) { selected = nil; randomTarget = nil }.id(target)
       } else {
         VStack(alignment: .leading) {
           HStack {
@@ -371,7 +375,30 @@ enum InstalledSources {
               }
             }
             if startingLink == nil && (!definitions.isEmpty || !commonRules.isEmpty) { Button(tr("筛选")) { showFilters = true } }
+            if site.random && startingTag == nil && startingLink == nil {
+              Button(tr(randomRequest == nil ? "随机一部" : "取消")) {
+                randomError = nil
+                randomRequest = randomRequest == nil ? UUID() : nil
+              }
+              .task(id: randomRequest) {
+                guard randomRequest != nil else { return }
+                do {
+                  let reference = try await randomPrompt.perform { ticket in
+                    try await session.randomReference(library, site: site, confirmation: ticket)
+                  }
+                  let target = try await randomPrompt.perform { ticket in
+                    try await session.resolveWorkReference(library, site: site, reference: reference, confirmation: ticket)
+                  }
+                  try Task.checkCancellation()
+                  randomRequest = nil
+                  randomTarget = target
+                } catch {
+                  if !Task.isCancelled { randomError = siteMessage(error); randomRequest = nil }
+                }
+              }.siteConfirmation(randomPrompt, tr: tr)
+            }
           }
+          if let randomError { Text(tr(randomError)).font(.caption) }
           List {
             ForEach(works) { item in
               if site.detail { Button(item.title) { selected = item } } else { Text(item.title) }

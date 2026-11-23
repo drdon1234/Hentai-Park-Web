@@ -30,6 +30,8 @@ pub enum BrowseMethod {
     ResolveContentLink,
     SearchLink,
     Thumbnails,
+    Random,
+    ResolveLink,
 }
 impl BrowseMethod {
     fn protocol(&self) -> (&'static str, usize, usize) {
@@ -49,6 +51,8 @@ impl BrowseMethod {
             Self::ResolveContentLink => ("resolveContentLink", 1, 1),
             Self::SearchLink => ("searchLink", 2, 2),
             Self::Thumbnails => ("thumbnails", 2, 2),
+            Self::Random => ("random", 1, 1),
+            Self::ResolveLink => ("resolveLink", 1, 1),
         }
     }
 }
@@ -165,6 +169,8 @@ impl SourceService {
                     "comments":manifest["capabilities"]["comments"],
                     "related":manifest["capabilities"]["related"],
                     "thumbnails":manifest["capabilities"]["thumbnails"],
+                    "random":manifest["capabilities"]["random"],
+                    "resolveLink":manifest["capabilities"]["resolveLink"],
                     "subscriptionUpdates":manifest["capabilities"]["subscriptionUpdates"],
                     "nativeVideo":manifest["capabilities"]["videos"],
                     "metadataSearch":manifest["capabilities"]["metadataSearch"],

@@ -400,26 +400,35 @@ enum InstalledSources {
       loading = true
       problem = nil
       do {
+        var requestKeyword = keyword
+        var requestFilterSearch = filterSearch
+        var requestValues = filters[scope] ?? SiteBrowseOptions.defaults(definitions)
         if catalog == nil {
           let options = try await session.browseOptions(library, site: site.key, locale: locale)
           try Task.checkCancellation()
           catalog = options
           if let startingTag {
-            input = startingTag.keyword
-            keyword = startingTag.keyword
-            filterSearch = !startingTag.filters.isEmpty
-            filters["search"] = SiteBrowseOptions.defaults(options.searchFilters).merging(startingTag.filters) { _, value in value }
+            requestKeyword = startingTag.keyword
+            requestFilterSearch = !startingTag.filters.isEmpty
+            requestValues = SiteBrowseOptions.defaults(options.searchFilters).merging(startingTag.filters) { _, value in value }
+            input = requestKeyword
+            keyword = requestKeyword
+            filterSearch = requestFilterSearch
+            filters["search"] = requestValues
+          } else {
+            let options = searching ? options.searchFilters : options.feeds.first { $0.key == feed }?.options ?? []
+            requestValues = filters[scope] ?? SiteBrowseOptions.defaults(options)
           }
         }
-        if !searching && feed == nil {
+        if requestKeyword.isEmpty && !requestFilterSearch && startingLink == nil && feed == nil {
           loading = false
           delivered = attempt
           return
         }
         let result = try await prompt.perform { ticket in
           try await session.sitePage(
-            library, site: site, keyword: keyword, page: page, cursor: cursor, feedKey: feed,
-            values: filters[scope] ?? SiteBrowseOptions.defaults(definitions), filterSearch: filterSearch, link: startingLink,
+            library, site: site, keyword: requestKeyword, page: page, cursor: cursor, feedKey: feed,
+            values: requestValues, filterSearch: requestFilterSearch, link: startingLink,
             common: try SiteCommonRule.validated(limits[scope] ?? [:], rules: commonRules), confirmation: ticket)
         }
         try Task.checkCancellation()
@@ -519,27 +528,32 @@ enum InstalledSources {
   }
 }
 
-#if os(macOS)
-private struct DetailDisclosureStyle: DisclosureGroupStyle {
-  func makeBody(configuration: Configuration) -> some View {
+private struct DetailSection<Content: View>: View {
+  let title: String
+  @Binding var expanded: Bool
+  @ViewBuilder let content: () -> Content
+  var body: some View {
+    #if os(macOS)
     VStack(alignment: .leading, spacing: 8) {
       Button {
-        configuration.isExpanded.toggle()
+        expanded.toggle()
       } label: {
         HStack(spacing: 6) {
-          Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
+          Image(systemName: expanded ? "chevron.down" : "chevron.right")
             .font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
-          configuration.label
+          Text(title)
         }.frame(maxWidth: .infinity, alignment: .leading)
           .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
-      .accessibilityAddTraits(configuration.isExpanded ? .isSelected : [])
-      if configuration.isExpanded { configuration.content }
+      .accessibilityAddTraits(expanded ? .isSelected : [])
+      if expanded { content() }
     }
+    #else
+    DisclosureGroup(title, isExpanded: $expanded, content: content)
+    #endif
   }
 }
-#endif
 
 @MainActor struct SiteDetails: View {
   @EnvironmentObject private var recorder: BroadcastRecorder
@@ -576,6 +590,7 @@ private struct DetailDisclosureStyle: DisclosureGroupStyle {
   @State private var authorLink: String?
   @State private var detailSearch: DetailSearchTag?
   @State private var dictionary: SearchDictionary?
+  @State private var tagsExpanded = false
   @State private var searchPresented = false
   @State private var domainSearch = false
   @State private var playingGame = false
@@ -679,14 +694,11 @@ private struct DetailDisclosureStyle: DisclosureGroupStyle {
               }
             }
             if !detail.searchTags.isEmpty {
-              DisclosureGroup(tr("标签")) {
+              DetailSection(title: tr("标签"), expanded: $tagsExpanded) {
                 ForEach(Array(detail.searchTags.enumerated()), id: \.offset) { _, tag in
                   tagRow(tag)
                 }
               }
-              #if os(macOS)
-              .disclosureGroupStyle(DetailDisclosureStyle())
-              #endif
             }
             if !article.isEmpty {
               ArticleBody(session: session, library: library, site: site.key, title: detail.title,
@@ -758,7 +770,7 @@ private struct DetailDisclosureStyle: DisclosureGroupStyle {
                 }
               }
               if work.media == "comic", let first = work.chapters.first, !previews.isEmpty || previewHasNext {
-                DisclosureGroup(tr("预览"), isExpanded: $previewsExpanded) {
+                DetailSection(title: tr("预览"), expanded: $previewsExpanded) {
                   if previewsExpanded {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 82, maximum: 140))]) {
                       ForEach(Array(previews.enumerated()), id: \.offset) { ordinal, item in
@@ -789,9 +801,6 @@ private struct DetailDisclosureStyle: DisclosureGroupStyle {
                     }
                   }
                 }
-                #if os(macOS)
-                .disclosureGroupStyle(DetailDisclosureStyle())
-                #endif
               }
             }
             if site.comments && detail.allowsComments {

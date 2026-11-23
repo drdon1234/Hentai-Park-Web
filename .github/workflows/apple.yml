@@ -191,7 +191,7 @@ jobs:
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
                                      "7e3cffb7164fa2a6936a28063262c5f732953cf5c1673befa33e3f21184027c4" if os.environ["EXERCISE_SCOPE"] == "storage" else
-                                     "02d0693256475166247e986ee87a6a4b552c7b723156e77c6d78a4f8e8d79acb" if os.environ["EXERCISE_SCOPE"] == "full-history" else
+                                     "223badab1023e4528c40571bb2a3a1b083bf7d3e591675a897622f425772edce" if os.environ["EXERCISE_SCOPE"] == "full-history" else
                                      "9dc137fa6f259cfb761d812a63cbd7e0c9927f23fb75cc4183e3192b06422407" if os.environ["EXERCISE_SCOPE"] == "download-entry" else
                                      "3179165a607829ba6c2a9071b0daade1fbe981841ae5833ac2cf72b41bfcc1b7" if os.environ["EXERCISE_SCOPE"] == "shelf-display" else
                                      "fdaf167c7839870c77b0c2efcb178adf5eef6ff3d3c0831c35c015a33f7b05d3" if os.environ["EXERCISE_SCOPE"] == "detail-sections" else

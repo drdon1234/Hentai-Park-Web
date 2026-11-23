@@ -512,7 +512,11 @@ private final class LibraryModel: ObservableObject {
                     get: { destination != nil },
                     set: { presented in if !presented { leaveChapter() } }
                 )) {
-                    detail(showBack: false)
+                    if case .chapter? = destination {
+                        detail(showBack: false)
+                    } else {
+                        detail(showBack: true).navigationBarHidden(true)
+                    }
                 } label: { EmptyView() }
                 .accessibilityHidden(true)
                 TabView(selection: selection) {

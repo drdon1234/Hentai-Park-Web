@@ -19,6 +19,13 @@ public final class SourceLibrary: BundledScripts, @unchecked Sendable {
     return try? Data(contentsOf: resources.appendingPathComponent(name))
   }
 
+  fileprivate func bundledSites() throws -> [(String, String)] {
+    struct Entry: Decodable { let key: String; let name: String }
+    struct Index: Decodable { let sources: [Entry] }
+    let data = try Data(contentsOf: resources.appendingPathComponent("index.json"))
+    return try JSONDecoder().decode(Index.self, from: data).sources.map { ($0.key, $0.name) }
+  }
+
   func service(directory: URL, request: Request) throws -> SourceService {
     lock.lock()
     defer { lock.unlock() }
@@ -338,6 +345,48 @@ extension ProgressSession {
     try await installedSites(library).filter {
       $0.rankingOnly != true && $0.metadata != true && $0.reverseOnly != true
         && ($0.entryFeed != nil || $0.search == true || $0.unavailable == true)
+    }
+  }
+
+  public struct ManagedSite: Identifiable, Sendable {
+    public let id: String
+    public let name: String
+    public let enabled: Bool
+  }
+
+  public func managedSites(_ library: SourceLibrary) async throws -> [ManagedSite] {
+    let root = directory
+    return try await run { _, request in
+      struct Row: Decodable { let key: String; let order: Int; let enabled: Bool }
+      struct Registry: Decodable { let sources: [Row] }
+      let service = try library.service(directory: root, request: request)
+      let json = try service.pluginRegistry(request: request)
+      let rows = try JSONDecoder().decode(Registry.self, from: Data(json.utf8)).sources
+      var names = Dictionary(uniqueKeysWithValues: try library.bundledSites())
+      let available = try service.discoverySources(request: request)
+      if let items = try JSONSerialization.jsonObject(with: Data(available.utf8)) as? [[String: Any]] {
+        for item in items {
+          if let key = item["key"] as? String, let name = item["name"] as? String { names[key] = name }
+        }
+      }
+      return rows.sorted { $0.order < $1.order }.map {
+        ManagedSite(id: $0.key, name: names[$0.key] ?? $0.key, enabled: $0.enabled)
+      }
+    }
+  }
+
+  public func moveSite(_ library: SourceLibrary, key: String, anchor: String, after: Bool) async throws {
+    let root = directory
+    try await run { _, request in
+      try library.service(directory: root, request: request).movePlugin(key: key, anchor: anchor, after: after, request: request)
+    }
+  }
+
+  public func restoreSiteOrder(_ library: SourceLibrary) async throws {
+    let root = directory
+    try await run { _, request in
+      let keys = try library.bundledSites().map { $0.0 }
+      try library.service(directory: root, request: request).resetPluginOrder(bundled: keys, request: request)
     }
   }
 

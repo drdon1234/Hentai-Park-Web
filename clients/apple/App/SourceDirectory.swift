@@ -19,11 +19,17 @@ enum InstalledSources {
   let close: () -> Void
   @State private var sites: [InstalledSite]?
   @State private var chosen: InstalledSite?
+  @State private var managing = false
   @State private var failed = false
   @State private var retry = 0
 
   var body: some View {
-    if let chosen, let library = InstalledSources.library {
+    if managing, let library = InstalledSources.library {
+      SiteOrderView(session: session, library: library, tr: tr) {
+        managing = false
+        retry += 1
+      }
+    } else if let chosen, let library = InstalledSources.library {
       SourceResults(
         session: session, library: library, site: chosen, locale: locale, incognito: incognito,
         tr: tr
@@ -33,6 +39,8 @@ enum InstalledSources {
         HStack {
           Button(tr("返回"), action: close)
           Text(tr("全部站点")).font(.headline)
+          Spacer()
+          Button(tr("站点管理")) { managing = true }
         }.padding()
         if failed {
           Button(tr("站点加载失败，请重试")) { retry += 1 }.padding()
@@ -59,6 +67,63 @@ enum InstalledSources {
         } catch { if !Task.isCancelled { failed = true } }
       }
     }
+  }
+}
+
+@MainActor private struct SiteOrderView: View {
+  let session: ProgressSession
+  let library: SourceLibrary
+  let tr: (String) -> String
+  let back: () -> Void
+  @State private var rows: [ProgressSession.ManagedSite] = []
+  @State private var busy = false
+  @State private var failed = false
+  @State private var confirm = false
+
+  var body: some View {
+    VStack(alignment: .leading) {
+      HStack {
+        Button(tr("返回"), action: back)
+        Text(tr("站点管理")).font(.headline)
+        Spacer()
+        Button(tr("恢复站点默认顺序")) { confirm = true }
+      }.padding()
+      if failed { Button(tr("重试")) { Task { await update {} } }.padding(.horizontal) }
+      if busy { ProgressView() }
+      List(Array(rows.enumerated()), id: \.element.id) { index, row in
+        HStack {
+          Text(row.name)
+          if !row.enabled { Text(tr("未启用")).font(.caption) }
+          Spacer()
+          Button { move(index, -1) } label: { Image(systemName: "arrow.up") }
+            .accessibilityLabel(Text(tr("上移") + " " + row.name)).disabled(index == 0)
+          Button { move(index, 1) } label: { Image(systemName: "arrow.down") }
+            .accessibilityLabel(Text(tr("下移") + " " + row.name)).disabled(index + 1 == rows.count)
+        }.buttonStyle(.borderless)
+      }
+    }.disabled(busy)
+    .task { await update {} }
+    .alert(tr("恢复站点默认顺序"), isPresented: $confirm) {
+      Button(tr("取消"), role: .cancel) {}
+      Button(tr("恢复")) { Task { await update { try await session.restoreSiteOrder(library) } } }
+    } message: { Text(tr("将替换当前手动排列的站点顺序，是否继续？")) }
+  }
+
+  private func move(_ index: Int, _ offset: Int) {
+    guard rows.indices.contains(index + offset) else { return }
+    let key = rows[index].id, anchor = rows[index + offset].id
+    Task { await update { try await session.moveSite(library, key: key, anchor: anchor, after: offset > 0) } }
+  }
+
+  private func update(_ change: () async throws -> Void) async {
+    guard !busy else { return }
+    busy = true
+    defer { busy = false }
+    do {
+      try await change()
+      rows = try await session.managedSites(library)
+      failed = false
+    } catch { if !Task.isCancelled { failed = true } }
   }
 }
 

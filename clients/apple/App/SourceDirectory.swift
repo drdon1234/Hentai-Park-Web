@@ -946,10 +946,9 @@ private enum DetailDestination: Hashable, Identifiable {
               if work.contentDomain == "onlineGame" && work.media == "game" {
                 Button(tr("开始游戏")) { playingGame = true }
               }
-              ForEach(work.chapters, id: \.id) { row in
-                Button(row.title) {
+              SiteChapterDirectory(session: session, library: library, detail: detail, work: work, tr: tr,
+                                   canDownload: work.media == "comic" || work.media == "novel" || work.media == "video" && site.nativeVideo) { row in
                   chapter = ChapterKey(source: site.key, workId: work.workId, chapterId: row.id)
-                }
               }
               if work.media == "comic", let first = work.chapters.first, !previews.isEmpty || previewHasNext {
                 DetailSection(title: tr("预览"), expanded: $previewsExpanded) {

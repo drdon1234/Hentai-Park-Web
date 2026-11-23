@@ -93,6 +93,14 @@ public actor ProgressSession {
         try await preferences(LibraryPrivacy.self)
     }
 
+    public func readChapterIDs(source: String, work: String) async throws -> Set<String> {
+        try await run { store, _ in Set(try store.readChapterIds(source: source, work: work)) }
+    }
+
+    public func markChapters(_ chapters: [OfflineChapter], source: String, work: String, read: Bool) async throws {
+        try await run { store, _ in try store.markChaptersRead(source: source, work: work, chapters: chapters, read: read) }
+    }
+
     public func clearCache(home: Bool) async throws {
         let cache = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,
                                                appropriateFor: nil, create: true)

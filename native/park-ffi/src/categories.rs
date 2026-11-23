@@ -37,6 +37,31 @@ impl ProgressStore {
         Ok(park_storage::library::similar_favorite(&db, &source, &id, &title)?
             .map(|(source, id, title)| SimilarFavorite { source, id, title }))
     }
+    pub fn read_chapter_ids(&self, source: String, work: String) -> Result<Vec<String>, StorageError> {
+        let db = self.lock()?;
+        let mut query = db.prepare("SELECT chapter_id FROM chapters WHERE source=? AND work_id=? AND read=1")?;
+        let ids = query.query_map(params![source, work], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?;
+        Ok(ids)
+    }
+    pub fn mark_chapters_read(&self, source: String, work: String, chapters: Vec<crate::OfflineChapter>, read: bool) -> Result<(), StorageError> {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| StorageError::IoFailure)?.as_millis();
+        let now = i64::try_from(now).map_err(|_| StorageError::IoFailure)?;
+        let mut db = self.lock()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        {
+            let mut write = tx.prepare("INSERT INTO chapters(source,work_id,chapter_id,title,read,date_read,progress_updated_at)
+                VALUES(?1,?2,?3,?4,?5,CASE WHEN ?5 THEN ?6 END,?6)
+                ON CONFLICT(source,work_id,chapter_id) DO UPDATE SET read=excluded.read,date_read=excluded.date_read,
+                progress_updated_at=excluded.progress_updated_at,last_page=CASE WHEN ?5 THEN last_page ELSE 0 END,
+                position=CASE WHEN ?5 THEN position ELSE 0 END,
+                position_updated_at=CASE WHEN position_updated_at IS NOT NULL THEN ?6 END")?;
+            for chapter in chapters {
+                write.execute(params![source, work, chapter.id, chapter.title, read, now])?;
+            }
+        }
+        Ok(tx.commit()?)
+    }
     pub fn edit_favorites(&self, works: Vec<FavoriteIdentity>, action: FavoriteEdit) -> Result<(), StorageError> {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| StorageError::IoFailure)?.as_millis();

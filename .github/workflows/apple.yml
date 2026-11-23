@@ -191,9 +191,9 @@ jobs:
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
                                      "30242a2a129bb69c0ac98f187b0f0f97cb41da23aa6a3a94ed89e00f1dc63c39" if os.environ["EXERCISE_SCOPE"] == "setup" else
-                                     "7c53f1f0c188873a734a076e0ca0da14e94af71e3fc93fe7bd36e830bb9c742e" if os.environ["EXERCISE_SCOPE"] == "shelf" else
-                                     "51df2d918d0bd65d854cc19b32f19f96e42e801a50ae5ff2e72af6fbbf98e391" if os.environ["EXERCISE_SCOPE"] == "collection" else
-                                     "dc5d04434c3a9dce5bbc705e58e7294c75b7f047dda6ba565b2279ea62e195b8" if os.environ["EXERCISE_SCOPE"] == "migration" else
+                                     "4f0d2d13c9ac387a11555983ff1ec11a60d1d425d6e6004087e8135bd427da1f" if os.environ["EXERCISE_SCOPE"] == "shelf" else
+                                     "a5f116eb140f55631adb3d57aadbeda6650233cea4f8c97f8bb9a8af312645f1" if os.environ["EXERCISE_SCOPE"] == "collection" else
+                                     "1bfe6d5e20fe67ea1b27b9f89144d4ca0c1c020bb1f6a889cb948f3028edf33c" if os.environ["EXERCISE_SCOPE"] == "migration" else
                                      "607f52ef318e4d4978ce4e458b8da5e4ee2f85e71e64cf284ee4bd9ade234532" if os.environ["EXERCISE_SCOPE"] == "mac-shelf" else
                                      "7de5019a14486a5a2ea7fe219715d49bc337500ed18098d7d221e4cc28c3982f" if os.environ["EXERCISE_SCOPE"] == "tavern" else
                                      "3ba92b344d3f1a2cbe80132e7ec94f54af3bfb64e774b9bbbec6396edb295375" if os.environ["EXERCISE_SCOPE"] == "pictures" else

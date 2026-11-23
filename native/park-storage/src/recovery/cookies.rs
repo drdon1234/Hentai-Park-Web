@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 /// 浏览器 CookieManager 完成持久写入后才允许清除恢复日志。调用方在后台线程打开库。
 pub trait RecoveryBrowser: Send + Sync {
-    fn set_cookie(&self, url: String, header: String) -> bool;
+    fn set_cookie(&self, source: &str, url: String, header: String) -> bool;
     fn flush(&self) -> bool;
 }
 
@@ -111,7 +111,7 @@ impl Partition {
                     header.set_secure(true);
                 }
             }
-            if !target.set_cookie(format!("https://{host}{path}"), header.to_string()) {
+            if !target.set_cookie(source, format!("https://{host}{path}"), header.to_string()) {
                 return Err(StorageError::PendingRecovery);
             }
             changed = true;

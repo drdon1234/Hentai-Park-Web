@@ -4,13 +4,13 @@ use std::path::Path;
 
 #[uniffi::export(callback_interface)]
 pub trait RecoveryBrowser: Send + Sync {
-    fn set_cookie(&self, url: String, header: String) -> bool;
+    fn set_cookie(&self, source: String, url: String, header: String) -> bool;
     fn flush(&self) -> bool;
 }
 pub(crate) struct Browser<'a>(pub &'a dyn RecoveryBrowser);
 impl recovery::RecoveryBrowser for Browser<'_> {
-    fn set_cookie(&self, url: String, header: String) -> bool {
-        self.0.set_cookie(url, header)
+    fn set_cookie(&self, source: &str, url: String, header: String) -> bool {
+        self.0.set_cookie(source.to_owned(), url, header)
     }
     fn flush(&self) -> bool {
         self.0.flush()

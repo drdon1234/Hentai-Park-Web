@@ -168,19 +168,56 @@ fn remove_owned(path: &Path, directory: bool) -> Result<()> {
 
 /// 分两次提交。首次提交后即使进程终止，仍可用同一任务重试原范围。
 pub fn delete(db: &mut Connection, source: &str, work: &str, requested: &[String]) -> Result<bool> {
+    delete_selected(db, source, work, Some(requested)).map(|(whole, _)| whole)
+}
+
+pub fn delete_read(db: &mut Connection) -> Result<u64> {
+    let mut query = db.prepare("SELECT DISTINCT c.source,c.work_id FROM chapters c
+        JOIN download_tasks d ON d.source=c.source AND d.uid=c.source||':'||c.work_id
+        WHERE c.read AND c.source!='local' ORDER BY c.source,c.work_id")?;
+    let works = query.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<std::result::Result<Vec<_>,_>>()?;
+    drop(query);
+    let mut count = 0;
+    for (source, work) in works {
+        count += delete_selected(db, &source, &work, None)?.1;
+    }
+    Ok(count)
+}
+
+fn delete_selected(db: &mut Connection, source: &str, work: &str, requested: Option<&[String]>) -> Result<(bool,u64)> {
     let uid = format!("{source}:{work}");
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let (_, mut data) = task(&tx, &uid, source, work)?;
+    let (_, mut data) = match task(&tx, &uid, source, work) {
+        Err(Error::Unavailable) if requested.is_none() => return Ok((false,0)),
+        result => result?,
+    };
     let ids: BTreeSet<&str> = data["chapters"]
         .as_array()
         .ok_or(Error::Invalid)?
         .iter()
         .map(|c| c["id"].as_str().ok_or(Error::Invalid))
         .collect::<Result<_>>()?;
-    let mut scope: BTreeSet<String> = requested.iter().cloned().collect();
+    let mut scope: BTreeSet<String> = if let Some(ids) = requested {
+        ids.iter().cloned().collect()
+    } else {
+        if source == "local" || data["media"] != "comic" { return Ok((false,0)); }
+        let completed: BTreeSet<&str> = data["completed"].as_array().into_iter().flatten()
+            .filter_map(Value::as_str).collect();
+        let mut query = tx.prepare("SELECT chapter_id FROM chapters WHERE source=? AND work_id=? AND read")?;
+        let read = query.query_map(params![source,work], |row| row.get::<_,String>(0))?
+            .collect::<std::result::Result<Vec<_>,_>>()?;
+        read.into_iter().filter(|id| completed.contains(id.as_str()) && ids.contains(id.as_str())).collect()
+    };
+    if requested.is_none() && scope.is_empty() { return Ok((false,0)); }
+    let count = scope.len() as u64;
     let mut whole = scope.is_empty();
     if let Some(pending) = data.get("deletingChapters").filter(|v| !v.is_null()) {
         let pending = pending.as_array().ok_or(Error::Invalid)?;
+        if requested.is_none() && ((pending.is_empty() && scope.len()!=ids.len()) ||
+            pending.iter().any(|id| !id.as_str().is_some_and(|s|scope.contains(s)))) {
+            return Err(Error::Unavailable);
+        }
         whole |= pending.is_empty();
         for id in pending {
             scope.insert(id.as_str().ok_or(Error::Invalid)?.to_owned());
@@ -203,11 +240,11 @@ pub fn delete(db: &mut Connection, source: &str, work: &str, requested: &[String
     // 重新读取最新待删集合，避免并发请求或另一个进程覆盖后来的章节。
     let (dir, mut data) = match task(&tx, &uid, source, work) {
         Ok(row) => row,
-        Err(Error::Unavailable) => return Ok(true),
+        Err(Error::Unavailable) => return Ok((true,count)),
         Err(e) => return Err(e),
     };
     let Some(pending) = data.get("deletingChapters") else {
-        return Ok(false);
+        return Ok((false,count));
     };
     let scope: BTreeSet<String> =
         serde_json::from_value(pending.clone()).map_err(|_| Error::Invalid)?;
@@ -264,5 +301,5 @@ pub fn delete(db: &mut Connection, source: &str, work: &str, requested: &[String
         )?;
     }
     tx.commit()?;
-    Ok(scope.is_empty())
+    Ok((scope.is_empty(),count))
 }

@@ -9,6 +9,16 @@ pub(crate) use import::subscriptions as import_subscriptions;
 mod library;
 mod sources;
 pub(crate) use sources::cookies_on_disk;
+/// 调用方持有源目录写锁。沿用恢复日志同步 Cookie 分区与浏览器，保留账号配置。
+pub fn clear_site_cookies(root: &std::path::Path, key: &str, domains: Vec<String>,
+    browser: &dyn crate::recovery::RecoveryBrowser) -> std::result::Result<(), crate::recovery::Error> {
+    use crate::recovery::{self, Partition};
+    let mut db = rusqlite::Connection::open_with_flags(root.join("park.db"), rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    recovery::recover(root, &db, Some(browser))?;
+    let before = cookies_on_disk(root, key)?;
+    let partition = Partition { before, after: Default::default(), domains };
+    recovery::apply(root, &mut db, Default::default(), [(key.to_owned(), partition)].into(), Some(browser), |_| Ok(()))
+}
 mod tavern;
 pub use encode::write;
 pub use library::merge_library;

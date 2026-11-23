@@ -77,6 +77,12 @@ import SwiftUI
     revision += 1
   }
 
+  func removeRead(fallback: ProgressSession) async throws -> UInt64 {
+    let count = try await (session ?? fallback).deleteReadDownloads()
+    if count > 0 { revision += 1 }
+    return count
+  }
+
   func didEnqueue() {
     revision += 1
     refresh()

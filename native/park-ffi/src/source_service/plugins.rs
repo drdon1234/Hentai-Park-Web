@@ -157,6 +157,9 @@ impl SourceService {
     pub fn plugin_registry(&self, request: Arc<Request>) -> Result<String> {
         Ok(self.catalog.management(&budget(&request))?.to_string())
     }
+    pub fn clear_site_cookies(&self, key: String, browser: Box<dyn RecoveryBrowser>, request: Arc<Request>) -> Result<()> {
+        Ok(self.catalog.clear_site_cookies(&key, &Browser(browser.as_ref()), budget(&request))?)
+    }
     pub fn move_plugin(&self, key: String, anchor: String, after: bool, request: Arc<Request>) -> Result<()> {
         Ok(self.catalog.move_site(&key, &anchor, after, &budget(&request))?)
     }

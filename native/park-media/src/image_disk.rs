@@ -10,13 +10,47 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 static DISK: Mutex<()> = Mutex::new(());
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 const MAX_IMAGE: u64 = 20 * 1024 * 1024;
+
+/// 只处理应用缓存内归属明确的三个目录，不跟随链接或触及下载、分区和持久数据。
+pub fn cache_bytes(cache: &Path, home: bool, clear: bool) -> std::io::Result<u64> {
+    use std::io::{Error, ErrorKind};
+    use std::sync::atomic::Ordering;
+    let _guard = DISK.lock().map_err(|_| Error::other("cache_lock"))?;
+    let root = cache.join("park_cache");
+    match fs::symlink_metadata(&root) {
+        Ok(meta) if meta.is_dir() => (),
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(0),
+        Ok(_) => return Err(Error::new(ErrorKind::InvalidData, "cache_root")),
+        Err(e) => return Err(e),
+    }
+    if clear && !home { GENERATION.fetch_add(1, Ordering::SeqCst); }
+    let names: &[&str] = if home { &["home_metadata"] } else { &["img", "subscription_media"] };
+    let mut pending: Vec<_> = names.iter().map(|name| root.join(name)).collect();
+    let mut bytes = 0u64;
+    while let Some(path) = pending.pop() {
+        let meta = match fs::symlink_metadata(&path) {
+            Ok(meta) => meta,
+            Err(e) if e.kind() == ErrorKind::NotFound => continue,
+            Err(e) => return Err(e),
+        };
+        if meta.is_dir() {
+            for entry in fs::read_dir(&path)? { pending.push(entry?.path()); }
+        } else if meta.is_file() {
+            bytes = bytes.saturating_add(meta.len());
+            if clear { fs::remove_file(path)?; }
+        }
+    }
+    Ok(bytes)
+}
 
 #[derive(Clone)]
 pub struct ImageCacheEntry {
     root: PathBuf,
     key: String,
     limit: u64,
+    generation: u64,
 }
 impl ImageCacheEntry {
     pub fn new(
@@ -38,6 +72,7 @@ impl ImageCacheEntry {
         );
         Self {
             root: cache.join("park_cache"),
+            generation: GENERATION.load(std::sync::atomic::Ordering::SeqCst),
             key,
             limit,
         }
@@ -113,6 +148,7 @@ impl ImageCacheEntry {
             return;
         }
         let Ok(_guard) = DISK.lock() else { return };
+        if self.generation != GENERATION.load(std::sync::atomic::Ordering::SeqCst) { return; }
         let Some(path) = self.path(true) else { return };
         let Some(parent) = path.parent() else { return };
         let Ok(mut temp) = tempfile::NamedTempFile::new_in(parent) else {

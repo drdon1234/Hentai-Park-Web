@@ -1,4 +1,3 @@
-import CryptoKit
 import ParkCore
 import SwiftUI
 import WebKit
@@ -68,13 +67,9 @@ import WebKit
         let id = game.websiteDataIdentifier
       {
         config.websiteDataStore = WKWebsiteDataStore(forIdentifier: id)
-      } else if case .confirmation = policy, #available(iOS 17, macOS 14, *), let originalSite {
+      } else if case .confirmation = policy, let originalSite {
         // 关联到站点的原站窗口共用同一分区。临时验证和无痕窗口不传入站点标识。
-        let hash = SHA256.hash(data: Data(("park_site_" + originalSite).utf8))
-        let bytes = Array(hash.prefix(16))
-        let id = UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-                             bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
-        config.websiteDataStore = WKWebsiteDataStore(forIdentifier: id)
+        config.websiteDataStore = SiteBrowserCookies.store(for: originalSite)
       } else {
         config.websiteDataStore = .nonPersistent()
       }

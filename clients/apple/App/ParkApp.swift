@@ -676,7 +676,7 @@ private final class LibraryModel: ObservableObject {
         } else if case .recordings? = destination, let session = model.session {
             BroadcastRecordings(session: session, tr: access.tr, back: leaveChapter)
         } else if case .settings? = destination {
-            AppleSettingsPanel(access: access, back: leaveChapter)
+            AppleSettingsPanel(access: access, session: model.session, back: leaveChapter)
         } else if case .sites? = destination, let session = model.session {
             SourceDirectory(session:session, locale:access.locale, incognito:access.privacy?.incognito==true, tr:access.tr, close:leaveChapter)
         } else if case .manageSites? = destination, let session = model.session, let library = InstalledSources.library {
@@ -926,8 +926,86 @@ let appleCategoryOptions: [AppleCategoryOption] = [
     }
 }
 
+@MainActor private struct AppleStorageSettings: View {
+    let session: ProgressSession
+    let tr: (String) -> String
+    @EnvironmentObject private var downloads: DownloadQueue
+    @State private var confirming = false
+    @State private var choosingSite = false
+    @State private var sites: [ProgressSession.ManagedSite] = []
+    @State private var chosen = ""
+    @State private var busy = false
+    @State private var feedback = ""
+
+    private func perform(_ operation: @escaping () async throws -> String) {
+        guard !busy else { return }
+        busy = true
+        feedback = ""
+        Task {
+            defer { busy = false }
+            do { feedback = try await operation() }
+            catch { feedback = tr("保存失败，请重试") }
+        }
+    }
+
+    var body: some View {
+        Section(header: Text(tr("存储空间"))) {
+            ForEach([true, false], id: \.self) { home in
+                Button(tr(home ? "主页数据缓存" : "媒体缓存")) {
+                    perform {
+                        try await session.clearCache(home: home)
+                        return tr("缓存已清除")
+                    }
+                }
+            }
+            Button(tr("删除已读章节的下载")) { confirming = true }
+                .alert(tr("删除已读章节的下载"), isPresented: $confirming) {
+                    Button(tr("取消"), role: .cancel) {}
+                    Button(tr("删除"), role: .destructive) {
+                        perform {
+                            let count = try await downloads.removeRead(fallback: session)
+                            return tr("已删除 {value0} 个章节").replacingOccurrences(of: "{value0}", with: String(count))
+                        }
+                    }
+                } message: { Text(tr("只删除标记为已读的漫画章节，本地导入不受影响")) }
+            Button(tr("清除某个站点的 Cookie")) {
+                perform {
+                    guard let library = InstalledSources.library else { throw SiteReadError.malformed }
+                    sites = try await session.managedSites(library)
+                    chosen = ""
+                    choosingSite = true
+                    return ""
+                }
+            }
+            .sheet(isPresented: $choosingSite) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(tr("清除哪个站点的 Cookie？")).font(.headline)
+                    Picker(tr("站点"), selection: $chosen) {
+                        Text(verbatim: "—").tag("")
+                        ForEach(sites) { site in Text(site.name).tag(site.id) }
+                    }.pickerStyle(.menu)
+                    HStack {
+                        Button(tr("取消")) { choosingSite = false }
+                        Button(tr("清除"), role: .destructive) {
+                            let selected = sites.first { $0.id == chosen }
+                            guard let selected, let library = InstalledSources.library else { return }
+                            choosingSite = false
+                            perform {
+                                try await session.clearCookies(library, source: selected.id)
+                                return tr("已清除 {value0} 的 Cookie").replacingOccurrences(of: "{value0}", with: selected.name)
+                            }
+                        }.disabled(chosen.isEmpty)
+                    }
+                }.padding()
+            }
+            if !feedback.isEmpty { Text(feedback) }
+        }.disabled(busy)
+    }
+}
+
 @MainActor private struct AppleSettingsPanel: View {
     @ObservedObject var access: LibraryAccess
+    let session: ProgressSession?
     let back: () -> Void
     @State private var categories = Set(appleCategoryOptions.map { $0.id })
     @State private var editProxy = false
@@ -979,6 +1057,9 @@ let appleCategoryOptions: [AppleCategoryOption] = [
                 let stored = access.privacy?.proxy ?? ""
                 Text(stored.isEmpty ? access.tr("未设置（使用系统网络 / VPN）") :
                     proxySummary(stored) ?? access.tr("代理地址格式无效，请填写主机:端口")).font(.caption)
+            }
+            if let session {
+                AppleStorageSettings(session: session, tr: access.tr)
             }
             Section(header: Text(access.tr("语言"))) {
                 Picker(access.tr("界面语言"), selection: Binding(

@@ -382,6 +382,17 @@ extension ProgressSession {
     }
   }
 
+  #if os(macOS) || os(iOS)
+  public func clearCookies(_ library: SourceLibrary, source: String) async throws {
+    let root = directory
+    try await run { _, request in
+      let service = try library.service(directory: root, request: request)
+      try service.clearSiteCookies(key: source, browser: SiteCookieRecovery(), request: request)
+    }
+    try await SiteBrowserCookies.clear(source)
+  }
+  #endif
+
   public func restoreSiteOrder(_ library: SourceLibrary) async throws {
     let root = directory
     try await run { _, request in

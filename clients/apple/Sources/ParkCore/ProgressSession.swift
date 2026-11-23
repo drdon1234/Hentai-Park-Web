@@ -56,7 +56,11 @@ public actor ProgressSession {
 
     public static func open(directory: URL) async throws -> ProgressSession {
         let store = try await Task.detached {
-            try ProgressStore.openLibrary(supportDirectory: directory.path)
+            #if os(macOS) || os(iOS)
+            return try ProgressStore.openLibraryWithBrowser(supportDirectory: directory.path, browser: SiteCookieRecovery())
+            #else
+            return try ProgressStore.openLibrary(supportDirectory: directory.path)
+            #endif
         }.value
         try Task.checkCancellation()
         return ProgressSession(store: store, directory: directory)
@@ -83,6 +87,16 @@ public actor ProgressSession {
 
     public func privacySettings() async throws -> LibraryPrivacy {
         try await preferences(LibraryPrivacy.self)
+    }
+
+    public func clearCache(home: Bool) async throws {
+        let cache = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,
+                                               appropriateFor: nil, create: true)
+        try await run { store, _ in try store.clearStorageCache(cacheDirectory: cache.path, home: home) }
+    }
+
+    public func deleteReadDownloads() async throws -> UInt64 {
+        try await run { store, _ in try store.deleteReadDownloads() }
     }
 
     public func novelSettings() async throws -> NovelPreferences {

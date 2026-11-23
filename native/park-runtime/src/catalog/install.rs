@@ -35,6 +35,15 @@ fn domains(manifest: &Value) -> Vec<String> {
     park_storage::cookies::declared_domains(manifest)
 }
 impl SourceCatalog {
+    pub fn clear_site_cookies(&self, key: &str, browser: &dyn RecoveryBrowser, call: Invocation) -> Result<(), Error> {
+        let _lock = self.lock(true, &call)?;
+        let list = registry(&self.root).map_err(|_| Error::Storage)?;
+        let row = list["sources"].as_array().and_then(|rows| rows.iter().find(|row| row["key"] == key)).ok_or(Error::Config)?;
+        let manifest = installed_manifest(&self.root, key, row["sha256"].as_str().unwrap_or(""), &self.polyfills, call.clone())?;
+        call.check()?;
+        self.sessions.partition(key, Purpose::Source)?.invalidate()?;
+        park_storage::backup::clear_site_cookies(&self.root, key, domains(&manifest), browser).map_err(|_| Error::Storage)
+    }
     pub fn move_site(&self, key: &str, anchor: &str, after: bool, call: &Invocation) -> Result<(), Error> {
         let _lock = self.lock(true, call)?;
         park_storage::plugins::order_sources(&self.root, |rows| {

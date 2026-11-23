@@ -157,10 +157,10 @@ jobs:
       matrix:
         include: >-
           ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record","mac-shelf","mac-setup"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
-          || contains(fromJSON('["media","download-actions","discovery-scope","download-entry","shelf-display","detail-sections","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
+          || contains(fromJSON('["media","download-actions","discovery-scope","migration","download-entry","shelf-display","detail-sections","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'audio' && '[{"host":"iPhone","runtime":"18.6"}]'
           || inputs.scope == 'domain-recheck' && '[{"host":"iPhone","runtime":"18.6"}]'
-          || contains(fromJSON('["movie","domains","reading","pictures","tavern","setup","shelf","collection","migration","game"]'), inputs.scope) && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
+          || contains(fromJSON('["movie","domains","reading","pictures","tavern","setup","shelf","collection","game"]'), inputs.scope) && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'native' && '[{"host":"iPhone","runtime":"26.2"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'phone' && '[{"host":"iPhone","runtime":"26.2"}]' || inputs.scope == 'runtime'
           && '[{"host":"iPhone","runtime":"18.5"},{"host":"iPhone","runtime":"18.6"}]'
@@ -194,12 +194,12 @@ jobs:
                                      "ba200027087e2ee1efcfc2939caa3985ed8cbb4f2b34a1cd9be7a92dc900c775" if os.environ["EXERCISE_SCOPE"] == "download-entry" else
                                      "4b98802fdca70a1b9544b8666a4f295a84c839f595f0088a3ea75bcd9dffdcbd" if os.environ["EXERCISE_SCOPE"] == "shelf-display" else
                                      "59710511b649e6358f19f17fd73dd31c93abf7d930a05b37702ffd1664e68b98" if os.environ["EXERCISE_SCOPE"] == "detail-sections" else
-                                     "b41f08564311a32634896e708ba982e5c0a015aa85b61253f7fb94e8f912d973" if os.environ["EXERCISE_SCOPE"] == "discovery-scope" else
+                                     "664e2daba9698822b1c65faf4168bbe2c1da7f1f0b52b7e0b92c9d895c8d4503" if os.environ["EXERCISE_SCOPE"] == "discovery-scope" else
                                      "5e3dcf168c2128d6d2a4dc9a65b6644e8a13d313a3aedb1636e12c0437d5813d" if os.environ["EXERCISE_SCOPE"] == "download-actions" else
                                      "30785acdc161f1d9f3c3181827e7e1685e9ec7b182de155c0ebfa9c78540be2b" if os.environ["EXERCISE_SCOPE"] == "setup" else
                                      "e8b98734706140939a2157137a73df73e00e69617f54602885bf2fb9b0be1d4a" if os.environ["EXERCISE_SCOPE"] == "shelf" else
                                      "a36fd8f574664d8c1f59cef6ee8690989d12aaf98ee2b3154d3cb615251b4bee" if os.environ["EXERCISE_SCOPE"] == "collection" else
-                                     "a538a3cb2bb9b777d1d9185d9f49f1f9534b16e25abab2165d9f62ed2a1484ae" if os.environ["EXERCISE_SCOPE"] == "migration" else
+                                     "59ed9cfc798d61a81f577a339a1ab9039b387c8735206f867f872d511b45a2d0" if os.environ["EXERCISE_SCOPE"] == "migration" else
                                      "a9a8e96be0096f2663d09859534f85c95f0cb2a0492bcd7bdb4240d5f628c5bf" if os.environ["EXERCISE_SCOPE"] == "mac-shelf" else
                                      "b484cedcd8968456373b0f1fa3b58dc36f4b662f21839fecf9eeb0416c833161" if os.environ["EXERCISE_SCOPE"] == "mac-setup" else
                                      "29c666e8563a003adeefff2d3eaefd41b9266257fbce98a0ee7fe015744f9ce6" if os.environ["EXERCISE_SCOPE"] == "tavern" else

@@ -1336,7 +1336,7 @@ private enum DetailDestination: Hashable, Identifiable {
           let part = row.body[element.index]
           if part.type == "image", let address = part.url {
             ArticlePicture(session: session, library: library, site: site.key, address: address,
-              title: element.text, maximum: 1000, tr: tr)
+              title: element.text, maximum: 1000, tr: tr, openFailedImage: { link = address })
           } else if part.type == "link", let address = part.url {
             Button(element.text.isEmpty ? address : element.text) { link = address }
           } else if !element.text.isEmpty { Text(element.text) }

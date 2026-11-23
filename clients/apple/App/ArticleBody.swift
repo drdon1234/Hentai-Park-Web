@@ -89,6 +89,7 @@ import ParkCore
   let maximum: Int
   let tr: (String) -> String
   var open: (() -> Void)? = nil
+  var openFailedImage: (() -> Void)? = nil
   @State private var pixels: CGImage?
   @State private var failed = false
   @State private var retry = 0
@@ -100,6 +101,7 @@ import ParkCore
         if let open { Button(action: open) { image } } else { image }
       } else if failed {
         Button(tr("重试")) { retry += 1 }
+        if let openFailedImage { Button(tr("查看图片"), action: openFailedImage) }
       } else { ProgressView() }
     }.task(id: retry) {
       do {

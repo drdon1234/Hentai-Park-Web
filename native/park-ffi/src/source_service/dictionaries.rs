@@ -30,25 +30,16 @@ impl DictionaryIndex {
         ).collect();
         serde_json::Value::Array(rows).to_string()
     }
-}
-
-#[uniffi::export]
-impl SourceService {
-    pub fn official_dictionaries(&self, request: Arc<Request>) -> Result<Arc<DictionaryIndex>> {
+    #[uniffi::constructor]
+    pub fn parse(bytes: Vec<u8>) -> Result<Arc<Self>> {
+        if bytes.len() > LIMIT {
+            return Err(SourceFailure::Unsupported);
+        }
         #[derive(Deserialize)]
         struct Index {
             schema: u32,
             packs: Vec<Entry>,
         }
-        let channel = CONTRACT["officialRepositories"]["tagTranslations"]
-            .as_str()
-            .unwrap();
-        let bytes = self.repository_resource(
-            &format!("{}/{channel}/index.json", base()),
-            true,
-            &request,
-            LIMIT,
-        )?;
         let index: Index =
             serde_json::from_slice(&bytes).map_err(|_| SourceFailure::Unsupported)?;
         if index.schema != 1 || index.packs.len() > 10_000 {
@@ -90,7 +81,52 @@ impl SourceService {
         }
         Ok(Arc::new(DictionaryIndex { entries }))
     }
+    pub fn asset_url(&self, source: String, locale: String) -> Result<String> {
+        Ok(self.entry(source, locale)?.url.clone())
+    }
+    pub fn verify(&self, source: String, locale: String, bytes: Vec<u8>) -> Result<()> {
+        verify_entry(self.entry(source, locale)?, &bytes)
+    }
+}
+impl DictionaryIndex {
+    fn entry(&self, source: String, locale: String) -> Result<&Entry> {
+        self.entries
+            .get(&(source, locale))
+            .ok_or(SourceFailure::Unsupported)
+    }
+}
+fn verify_entry(entry: &Entry, bytes: &[u8]) -> Result<()> {
+    if bytes.len() > LIMIT {
+        return Err(SourceFailure::Unsupported);
+    }
+    if !format!("{:x}", Sha256::digest(&bytes)).eq_ignore_ascii_case(&entry.sha256) {
+        return Err(SourceFailure::Unsupported);
+    }
+    let pack: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|_| SourceFailure::Unsupported)?;
+    if pack["source"] != entry.source
+        || pack["locale"] != entry.locale
+        || pack["version"] != entry.version
+    {
+        return Err(SourceFailure::Unsupported);
+    }
+    Ok(())
+}
 
+#[uniffi::export]
+impl SourceService {
+    pub fn official_dictionaries(&self, request: Arc<Request>) -> Result<Arc<DictionaryIndex>> {
+        let channel = CONTRACT["officialRepositories"]["tagTranslations"]
+            .as_str()
+            .unwrap();
+        let bytes = self.repository_resource(
+            &format!("{}/{channel}/index.json", base()),
+            true,
+            &request,
+            LIMIT,
+        )?;
+        DictionaryIndex::parse(bytes)
+    }
     pub fn official_dictionary(
         &self,
         index: Arc<DictionaryIndex>,
@@ -98,22 +134,9 @@ impl SourceService {
         locale: String,
         request: Arc<Request>,
     ) -> Result<Vec<u8>> {
-        let entry = index
-            .entries
-            .get(&(source, locale))
-            .ok_or(SourceFailure::Unsupported)?;
+        let entry = index.entry(source, locale)?;
         let bytes = self.repository_resource(&entry.url, true, &request, LIMIT)?;
-        if !format!("{:x}", Sha256::digest(&bytes)).eq_ignore_ascii_case(&entry.sha256) {
-            return Err(SourceFailure::Unsupported);
-        }
-        let pack: serde_json::Value =
-            serde_json::from_slice(&bytes).map_err(|_| SourceFailure::Unsupported)?;
-        if pack["source"] != entry.source
-            || pack["locale"] != entry.locale
-            || pack["version"] != entry.version
-        {
-            return Err(SourceFailure::Unsupported);
-        }
+        verify_entry(entry, &bytes)?;
         Ok(bytes)
     }
 }

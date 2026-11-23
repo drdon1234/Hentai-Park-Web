@@ -54,6 +54,15 @@ def source_resources(destination):
     run('node', 'clients/web/scripts/build-polyfills.mjs', destination / 'park_polyfills.js')
 
 
+def verify_resources(resources, bundled):
+    files = {path.relative_to(resources) for path in resources.rglob('*') if path.is_file()}
+    if not bundled.is_dir() or files != {path.relative_to(bundled) for path in bundled.rglob('*') if path.is_file()}:
+        raise ValueError('应用产物内置资源清单与原件不一致')
+    for name in files:
+        if (bundled / name).read_bytes() != (resources / name).read_bytes():
+            raise ValueError(f'应用产物内置资源内容不一致：{name}')
+
+
 def build(stage):
     common = dict(os.environ, CARGO_TARGET_DIR=str(CARGO), IPHONEOS_DEPLOYMENT_TARGET='15.0',
                   MACOSX_DEPLOYMENT_TARGET='12.0')
@@ -113,10 +122,7 @@ def build(stage):
         app = derived / 'Build/Products' / product_directory / 'HentaiPark.app'
         contents = app / 'Contents' if platform == 'macOS' else app
         bundled = (contents / 'Resources' if platform == 'macOS' else contents) / 'ParkSources'
-        if not bundled.is_dir() or {p.name for p in bundled.iterdir()} != {p.name for p in resources.iterdir()}:
-            raise ValueError('应用产物缺少内置站点资源')
-        if any((bundled / source.name).read_bytes() != source.read_bytes() for source in resources.iterdir()):
-            raise ValueError('应用产物与站点资源原件不一致')
+        verify_resources(resources, bundled)
         with (contents / 'Info.plist').open('rb') as info:
             metadata = plistlib.load(info)
         if (metadata['DTPlatformName'] != sdk or metadata['CFBundleIdentifier'] != identity['PRODUCT_BUNDLE_IDENTIFIER']

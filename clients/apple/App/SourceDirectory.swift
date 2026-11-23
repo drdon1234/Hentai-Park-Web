@@ -721,6 +721,10 @@ enum InstalledSources {
   let kind: DetailSectionKind
   let tr: (String) -> String
   let select: (SiteWork) -> Void
+  var parent: SiteComment? = nil
+  @State private var selectedReply: SiteComment?
+  @State private var sort = "default"
+  @State private var orders: [SiteCommentOrder] = []
   @State private var open = false
   @State private var entries: [DetailEntry] = []
   @State private var nextPage: Int? = 1
@@ -733,9 +737,25 @@ enum InstalledSources {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Button(tr(kind == .comments ? "评论" : "相关作品")) { open.toggle() }
-      if open {
+      if parent == nil {
+        Button(tr(kind == .comments ? "评论" : "相关作品")) { open.toggle() }
+      }
+      if open || parent != nil {
         VStack(alignment: .leading, spacing: 8) {
+          if parent == nil && !orders.isEmpty {
+            Picker(tr("排序"), selection: Binding(get: {
+              sort == "default" ? orders[0].value : sort
+            }, set: { value in
+              sort = value
+              entries.removeAll()
+              nextPage = 1
+              cursor = nil
+              delivered = nil
+              attempt += 1
+            })) {
+              ForEach(orders) { order in Text(tr(order.label)).tag(order.value) }
+            }
+          }
           ForEach(entries) { entry in
             switch entry {
             case .work(let row): Button(row.title) { select(row) }
@@ -748,6 +768,10 @@ enum InstalledSources {
                     title: part.text ?? "", maximum: 1000, tr: tr)
                 } else if let text = part.text, !text.isEmpty { Text(text) }
                 else if part.type == "link", let address = part.url { Text(address) }
+              }
+              if row.repliesAvailable == true {
+                Button(tr("查看回复")) { selectedReply = row }
+                  .accessibilityHint(row.author?.name ?? "")
               }
             }
           }
@@ -762,10 +786,22 @@ enum InstalledSources {
         }.task(id: attempt) { await load() }
       }
     }.siteConfirmation(prompt, tr: tr)
+    .sheet(item: $selectedReply) { row in
+      VStack(alignment: .leading) {
+        Button(tr("返回")) { selectedReply = nil }
+        ScrollView {
+          DetailEntriesPanel(session: session, library: library, site: site, work: work, kind: .comments,
+            tr: tr, select: select, parent: row)
+        }
+      }.padding()
+    }
   }
 
   private func load() async {
     guard delivered != attempt, let page = nextPage else { return }
+    if let parent, delivered == nil && entries.isEmpty {
+      entries = (parent.replies ?? []).map(DetailEntry.comment)
+    }
     if kind == .related && delivered == nil {
       var seen = Set<String>()
       entries = work.recommendations.filter { seen.insert($0.id).inserted }.map(DetailEntry.work)
@@ -776,10 +812,11 @@ enum InstalledSources {
     do {
       let result = try await prompt.perform { consent in
         try await session.detailEntries(library, site: site, work: work, section: kind, page: page,
-          cursor: cursor, confirmation: consent)
+          cursor: cursor, confirmation: consent, sort: sort, parent: parent?.id)
       }
       try Task.checkCancellation()
       if result.reset { entries.removeAll() }
+      if !result.orders.isEmpty { orders = result.orders }
       var seen = Set(entries.map(\.id))
       let fresh = result.entries.filter { seen.insert($0.id).inserted }
       entries.append(contentsOf: fresh)

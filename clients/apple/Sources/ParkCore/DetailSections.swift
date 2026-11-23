@@ -10,6 +10,15 @@ public struct SiteComment: Decodable, Identifiable, Sendable {
   public let id: String
   public let author: Author?
   public let body: [Part]
+  public let repliesAvailable: Bool?
+  public let replyCount: Int?
+  public let replies: [SiteComment]?
+}
+
+public struct SiteCommentOrder: Decodable, Identifiable, Sendable {
+  public let value: String
+  public let label: String
+  public var id: String { value }
 }
 
 public enum DetailEntry: Identifiable, Sendable {
@@ -29,11 +38,13 @@ public struct DetailEntryPage: Sendable {
   public let cursor: PluginOptionValue?
   public let nextPage: Int?
   public let reset: Bool
+  public let orders: [SiteCommentOrder]
 }
 
 extension ProgressSession {
   public func detailEntries(_ library: SourceLibrary, site: InstalledSite, work: SiteWork,
-    section: DetailSectionKind, page: Int, cursor: PluginOptionValue?, confirmation: ManualRead?
+    section: DetailSectionKind, page: Int, cursor: PluginOptionValue?, confirmation: ManualRead?,
+    sort: String = "default", parent: String? = nil
   ) async throws -> DetailEntryPage {
     var options: [String: Any] = ["page": page]
     if let cursor {
@@ -44,6 +55,8 @@ extension ProgressSession {
     case .comments:
       guard site.comments && work.allowsComments else { throw SiteReadError.malformed }
       method = .comments
+      options["sort"] = sort
+      if let parent { options["parentId"] = parent }
       if let address = work.commentURL { options["context"] = ["url": address] }
     case .related:
       guard site.related else { throw SiteReadError.malformed }
@@ -57,6 +70,7 @@ extension ProgressSession {
       let page: Int?
       let cursor: PluginOptionValue?
       let reset: Bool?
+      let sorts: [SiteCommentOrder]?
     }
     let data = Data(raw.utf8)
     let info = try JSONDecoder().decode(Page.self, from: data)
@@ -74,6 +88,7 @@ extension ProgressSession {
     let current = info.page ?? page
     guard current > 0 && current < Int.max else { throw SiteReadError.malformed }
     let more = info.hasNext == true && (info.cursor == nil || info.cursor != cursor)
-    return DetailEntryPage(entries: entries, cursor: info.cursor, nextPage: more ? current + 1 : nil, reset: info.reset == true)
+    return DetailEntryPage(entries: entries, cursor: info.cursor, nextPage: more ? current + 1 : nil,
+      reset: info.reset == true, orders: info.sorts ?? [])
   }
 }

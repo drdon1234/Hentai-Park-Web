@@ -67,6 +67,13 @@ extension ProgressSession {
     }
   }
 
+  public func removeDownload(_ work: LibraryWork) async throws {
+    downloadRequests[work.libraryID]?.values.forEach { $0.cancel() }
+    try await run { store, _ in
+      _ = try store.deleteDownload(source: work.source, workId: work.workId, chapters: [])
+    }
+  }
+
   private func download(
     _ library: SourceLibrary, id: LibraryWorkID, sites: UInt32, works: UInt32, pages: UInt32
   ) async throws -> Bool {

@@ -416,6 +416,7 @@ private final class LibraryModel: ObservableObject {
     @EnvironmentObject private var downloads: DownloadQueue
     @StateObject private var model = LibraryModel()
     @StateObject private var shelf = ShelfOptions()
+    @StateObject private var downloadSelection = DownloadSelection()
     @State private var group = 0
     @State private var retry = 0
     private enum Destination {
@@ -496,7 +497,7 @@ private final class LibraryModel: ObservableObject {
     }
 
     private func choose(_ index: Int) {
-        if index != group { shelf.finishSelection(); destination = nil; group = index }
+        if index != group { shelf.finishSelection(); downloadSelection.finish(); destination = nil; group = index }
     }
 
     private var selection: Binding<Int> { Binding(get: { group }, set: choose) }
@@ -554,10 +555,13 @@ private final class LibraryModel: ObservableObject {
             Text(access.tr("加载失败"))
             Button(access.tr("重试")) { retry += 1 }
         } else if let rows = model.works {
-            let filtered = index == 1 ? shelf.rows(rows) : rows.filter { index == 0 ? $0.historyMs != nil : $0.downloaded }
+            let filtered = index == 1 ? shelf.rows(rows) : index == 2 ? downloadSelection.rows(rows) : rows.filter { $0.historyMs != nil }
             List {
                 if index == 2 {
                     Button(access.tr("录制分卷")) { destination = .recordings }
+                    if let session = model.session {
+                        DownloadControls(selection: downloadSelection, works: filtered, session: session, tr: access.tr)
+                    }
                 }
                 if index == 2 && downloads.failed {
                     Text(access.tr("下载失败"))
@@ -581,7 +585,14 @@ private final class LibraryModel: ObservableObject {
                     if filtered.isEmpty { Text(access.tr(["没有继续阅读的作品","还没有收藏","没有下载任务"][index])) }
                     ForEach(filtered, id: \.libraryID) { work in
                         VStack(alignment: .leading, spacing: 8) {
-                            if index == 1, shelf.selecting {
+                            if index == 2, downloadSelection.selecting {
+                                let selected = downloadSelection.selected.contains(work.libraryID)
+                                Button {
+                                    if selected { downloadSelection.selected.remove(work.libraryID) }
+                                    else { downloadSelection.selected.insert(work.libraryID) }
+                                } label: { Label(work.title, systemImage: selected ? "checkmark.circle.fill" : "circle") }
+                                .accessibilityAddTraits(selected ? [.isSelected] : [])
+                            } else if index == 1, shelf.selecting {
                                 let selected = shelf.selected.contains(work.libraryID)
                                 Button {
                                     if selected { shelf.selected.remove(work.libraryID) }
@@ -618,7 +629,7 @@ private final class LibraryModel: ObservableObject {
                                 Button(work.title) { destination = .work(work) }
                             } else { Text(work.title) }
 
-                            if index == 2, let state = work.downloadStatus, state != 3,
+                            if index == 2, !downloadSelection.selecting, let state = work.downloadStatus, state != 3,
                                !work.invalidDownload, work.pendingDeletion == nil, let session = model.session {
                                 let resume = state == 2 || state == 4
                                 HStack {

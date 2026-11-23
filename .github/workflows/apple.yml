@@ -196,7 +196,7 @@ jobs:
                                      "cb12c586ee3213b7cf2a80ec5a066a6b437013f558eb145b2f263808a0d3df36" if os.environ["EXERCISE_SCOPE"] == "shelf-display" else
                                      "27b7b2223667ba3a20dec8da25c4e8ae3680f50df38eab26644d5a1f4d4da07e" if os.environ["EXERCISE_SCOPE"] == "host-preview-mac" else
                                      "ffe771be9e821a3e6e75d960d54f1c9fa81d5a5dd5c57064aa926d649f4f1128" if os.environ["EXERCISE_SCOPE"] == "host-preview" else
-                                     "e24e77295f6ed8586f417471c19aff7d97d75a35a8cd5c63089f842cd53434ce" if os.environ["EXERCISE_SCOPE"] == "host-tags" else
+                                     "4f1ba6fa87736f5d3f04f6b2b69ad6016713d5acaec1e6795060908f1eae2c03" if os.environ["EXERCISE_SCOPE"] == "host-tags" else
                                      "fa50f9d3dfb7a9dafbda5c01781e87b72b0e528cc9ea2537266b595ad8a7ab97" if os.environ["EXERCISE_SCOPE"] == "host-directory" else
                                      "0811bbf5f9a976cac3ed4251ab5515885567a665b068fe5c84128e75f6ec584a" if os.environ["EXERCISE_SCOPE"] == "host-favorites" else
                                      "5eefb4f4470a4af95acad553b145bb43a8e9384bfd6e2df3cc23f1e043694a72" if os.environ["EXERCISE_SCOPE"] == "host-metadata" else

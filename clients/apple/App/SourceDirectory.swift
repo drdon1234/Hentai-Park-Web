@@ -660,6 +660,13 @@ private struct DetailSection<Content: View>: View {
   }
 }
 
+private enum DetailDestination: Hashable, Identifiable {
+  case author(String)
+  case search(DetailSearchTag)
+  case editions(String)
+  var id: Self { self }
+}
+
 @MainActor struct SiteDetails: View {
   @EnvironmentObject private var recorder: BroadcastRecorder
   @Environment(\.blurCovers) private var blurCovers
@@ -692,12 +699,9 @@ private struct DetailSection<Content: View>: View {
   @State private var article: [SiteArticleBlock] = []
   @State private var selectedBlock: Int?
   @State private var relatedWork: SiteWork?
-  @State private var authorLink: String?
-  @State private var detailSearch: DetailSearchTag?
+  @State private var destination: DetailDestination?
   @State private var dictionary: SearchDictionary?
   @State private var tagsExpanded = false
-  @State private var searchPresented = false
-  @State private var domainSearch = false
   @State private var playingGame = false
   @State private var browsingVoice = false
   @State private var downloadSheet = false
@@ -747,15 +751,14 @@ private struct DetailSection<Content: View>: View {
   }
 
   private func searchDetail(_ tag: DetailSearchTag) {
-    detailSearch = tag
-    searchPresented = true
+    destination = .search(tag)
   }
 
   private func tagRow(_ tag: DetailSearchTag, link: String? = nil) -> some View {
     DetailTagRow(session: session, library: library, site: site, tag: tag, locale: locale,
       localText: dictionary?.translation(name: tag.name, namespace: tag.namespace), tr: tr,
       canOpen: link != nil || site.search == true) {
-        if let link { authorLink = link } else { searchDetail(tag) }
+        if let link { destination = .author(link) } else { searchDetail(tag) }
       }
   }
 
@@ -786,7 +789,7 @@ private struct DetailSection<Content: View>: View {
                   Button(tr("站内查找版本")) { searchDetail(DetailSearchTag(name: code)) }
                 }
                 if site.category != nil {
-                  Button(tr("跨站查找版本")) { domainSearch = true }
+                  Button(tr("跨站查找版本")) { destination = .editions(code) }
                 }
               }
             }
@@ -939,19 +942,18 @@ private struct DetailSection<Content: View>: View {
       } else {
         ProgressView()
       }
-    }.sheet(isPresented: Binding(get: { authorLink != nil }, set: { if !$0 { authorLink = nil } })) {
-      if let link = authorLink {
+    }.sheet(item: $destination) { target in
+      switch target {
+      case .author(let link):
         AnyView(AuthorDestination(session: session, library: library, site: site, address: link, locale: locale,
-          incognito: incognito, tr: tr, close: { authorLink = nil }))
-      }
-    }.sheet(isPresented: $searchPresented) {
-      if let detailSearch {
+          incognito: incognito, tr: tr, close: { destination = nil }))
+      case .search(let tag):
         AnyView(SourceResults(session: session, library: library, site: site, locale: locale, incognito: incognito,
-          tr: tr, startingTag: detailSearch, close: { searchPresented = false }))
+          tr: tr, startingTag: tag, close: { destination = nil }))
+      case .editions(let code):
+        AnyView(AggregateSearchPage(session: session, locale: locale, incognito: incognito, tr: tr,
+          back: { destination = nil }, initialKeyword: code, category: site.category))
       }
-    }.sheet(isPresented: $domainSearch) {
-      AnyView(AggregateSearchPage(session: session, locale: locale, incognito: incognito, tr: tr,
-        back: { domainSearch = false }, initialKeyword: detail?.workCode ?? "", category: site.category))
     }.sheet(item: $relatedWork) { selected in
       AnyView(SiteDetails(session: session, library: library, site: site, workId: selected.id, preview: selected,
         locale: locale, incognito: incognito, tr: tr, close: { relatedWork = nil }).id(selected.id))

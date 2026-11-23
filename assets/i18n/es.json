@@ -2079,5 +2079,13 @@
   "结构化输入": "Entrada estructurada",
   "后置指令": "Instrucción posterior al historial",
   "每行一个词条，按标题、关键词和正文填写": "Una entrada por línea, con título, palabras clave y contenido",
-  "浏览器离线。已载入的页面可以查看，读取实例文件和保存更改需要重新连接。": "El navegador está sin conexión. Puedes ver las páginas cargadas. Vuelve a conectarte para abrir archivos de la instancia o guardar cambios."
+  "浏览器离线。已载入的页面可以查看，读取实例文件和保存更改需要重新连接。": "El navegador está sin conexión. Puedes ver las páginas cargadas. Vuelve a conectarte para abrir archivos de la instancia o guardar cambios.",
+  "安全屏幕": "Pantalla segura",
+  "订阅通知": "Notificaciones de suscripciones",
+  "通知显示预览": "Mostrar vistas previas de notificaciones",
+  "首次使用设置": "Configuración inicial",
+  "选择首页内容范围，并设置隐私保护选项。之后仍可在我的页面调整。": "Elige el contenido de inicio y las opciones de privacidad. Puedes cambiarlas después en Más.",
+  "隐私": "Privacidad",
+  "首页兴趣": "Intereses de inicio",
+  "完成设置": "Terminar configuración"
 }

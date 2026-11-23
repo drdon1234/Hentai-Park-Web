@@ -2,6 +2,7 @@ import Foundation
 
 public struct LibraryPrivacy: Decodable, Sendable {
     public let adultConfirmed: Bool?
+    public let onboarded: Bool?
     public let incognito: Bool?
     public let appLock: Bool?
     public let appLockAfter: Int?
@@ -10,6 +11,7 @@ public struct LibraryPrivacy: Decodable, Sendable {
     public let subscriptionUpdateHours: Int?
     public let subscriptionNotifications: Bool?
     public let subscriptionNotificationPreview: Bool?
+    public let homeCategories: [String]?
 
     public var subscriptionHours: Int {
         adultConfirmed == true ? max(0, subscriptionUpdateHours ?? 6) : 0
@@ -100,6 +102,30 @@ public actor ProgressSession {
 
     public func setIncognito(_ enabled: Bool) async throws {
         try await run { store, _ in try store.savePreference(name: "incognito", json: enabled ? "true" : "false") }
+    }
+
+    public func setPrivacyPreference(_ name: String, enabled: Bool) async throws {
+        guard ["secureScreen", "appLock", "subscriptionNotifications", "subscriptionNotificationPreview"].contains(name) else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        try await run { store, _ in try store.savePreference(name: name, json: enabled ? "true" : "false") }
+    }
+
+    public func setPreference(_ name: String, json: String) async throws {
+        guard ["language", "homeCategories", "appLockAfter", "subscriptionUpdateHours", "onboarded"].contains(name) else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        try await run { store, _ in try store.savePreference(name: name, json: json) }
+    }
+
+    public func completeOnboarding(categories: [String], secureScreen: Bool, appLock: Bool) async throws {
+        let json = String(decoding: try JSONEncoder().encode(categories), as: UTF8.self)
+        try await run { store, _ in
+            try store.savePreference(name: "homeCategories", json: json)
+            try store.savePreference(name: "secureScreen", json: secureScreen ? "true" : "false")
+            try store.savePreference(name: "appLock", json: appLock ? "true" : "false")
+            try store.savePreference(name: "onboarded", json: "true")
+        }
     }
 
     public func libraryWorks() async throws -> [LibraryWork] {

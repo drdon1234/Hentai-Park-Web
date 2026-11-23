@@ -167,6 +167,55 @@ struct ParkApp: App {
         } catch { failed = true }
     }
 
+    func updatePrivacy(_ name: String, enabled: Bool) async {
+        guard !busy else { return }
+        busy = true
+        failed = false
+        defer { busy = false }
+        do {
+            let session = try await ProgressSession.openApplicationLibrary()
+            do {
+                try await session.setPrivacyPreference(name, enabled: enabled)
+                privacy = try await session.privacySettings()
+            } catch { await session.close(); throw error }
+            await session.close()
+        } catch { failed = true }
+    }
+
+    func updatePreference(_ name: String, json: String) async {
+        guard !busy else { return }
+        busy = true
+        failed = false
+        defer { busy = false }
+        do {
+            let session = try await ProgressSession.openApplicationLibrary()
+            do {
+                try await session.setPreference(name, json: json)
+                let settings = try await session.privacySettings()
+                if name == "language" {
+                    let language = settings.language.flatMap { $0.isEmpty || $0 == "system" ? nil : $0 }
+                    copy = try CopyCatalog(locale: language ?? Locale.preferredLanguages.first ?? "en", pluginJson: nil)
+                }
+                privacy = settings
+            } catch { await session.close(); throw error }
+            await session.close()
+        } catch { failed = true }
+    }
+
+    func finishOnboarding(categories: Set<String>, secureScreen: Bool, appLock: Bool) async {
+        guard !busy else { return }
+        busy = true
+        failed = false
+        defer { busy = false }
+        do {
+            let session = try await ProgressSession.openApplicationLibrary()
+            do {
+                try await session.completeOnboarding(categories: categories.sorted(), secureScreen: secureScreen, appLock: appLock)
+                privacy = try await session.privacySettings()
+            } catch { await session.close(); throw error }
+            await session.close()
+        } catch { failed = true }
+    }
     func unlock() async {
         guard locked, !busy else { return }
         let context = LAContext()
@@ -211,6 +260,8 @@ struct ParkApp: App {
                         Text(access.tr("HentaiPark 已锁定"))
                         Button(access.tr(access.failed ? "重试" : "解锁")) { Task { await access.unlock() } }.disabled(access.busy)
                     }
+                } else if settings.onboarded != true {
+                    AppleOnboardingPanel(access: access)
                 } else {
                     let hide = (inactive && (settings.secureScreen == true || settings.appLock == true))
                         || (captured && settings.secureScreen == true)
@@ -349,7 +400,7 @@ private final class LibraryModel: ObservableObject {
     @State private var group = 0
     @State private var retry = 0
     private enum Destination {
-        case sites, search, subscriptions, updates, rankings, recordings
+        case sites, search, subscriptions, updates, rankings, recordings, settings
         case work(LibraryWork), chapter(ChapterKey)
     }
     @State private var destination: Destination?
@@ -464,12 +515,13 @@ private final class LibraryModel: ObservableObject {
 
     @ViewBuilder private func section(_ index: Int) -> some View {
         if index == 3 {
-            Form {
+            List {
+                Button(access.tr("应用设置")) { destination = .settings }
                 Toggle(access.tr("无痕模式"), isOn: Binding(get: { access.privacy?.incognito == true }, set: { enabled in
                     Task { await access.setIncognito(enabled) }
                 })).disabled(access.busy)
                 if access.failed { Text(access.tr("保存失败，请重试")) }
-            }.padding()
+            }
         } else if model.failed {
             Text(access.tr("加载失败"))
             Button(access.tr("重试")) { retry += 1 }
@@ -559,6 +611,8 @@ private final class LibraryModel: ObservableObject {
                                 tr: access.tr, back: leaveChapter)
         } else if case .recordings? = destination, let session = model.session {
             BroadcastRecordings(session: session, tr: access.tr, back: leaveChapter)
+        } else if case .settings? = destination {
+            AppleSettingsPanel(access: access, back: leaveChapter)
         } else if case .sites? = destination, let session = model.session {
             SourceDirectory(session:session, locale:access.locale, incognito:access.privacy?.incognito==true, tr:access.tr, close:leaveChapter)
         } else if case .work(let onlineWork)? = destination, let session = model.session {
@@ -709,4 +763,136 @@ func thumbnail(at url: URL, maxSize: Int) throws -> CGImage {
           let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     else { throw CocoaError(.fileReadCorruptFile) }
     return image
+}
+
+private struct AppleCategoryOption: Identifiable {
+    let id: String
+    let label: String
+}
+
+private let appleCategoryOptions: [AppleCategoryOption] = [
+    AppleCategoryOption(id: "feed", label: "吃瓜"), AppleCategoryOption(id: "doujin", label: "本子"),
+    AppleCategoryOption(id: "anime", label: "里番"), AppleCategoryOption(id: "aiDrama", label: "AI短剧"),
+    AppleCategoryOption(id: "jav", label: "JAV"), AppleCategoryOption(id: "adult", label: "成人视频"),
+    AppleCategoryOption(id: "shortvideo", label: "短视频"), AppleCategoryOption(id: "recording", label: "录播"),
+    AppleCategoryOption(id: "gallery", label: "三次元美图"), AppleCategoryOption(id: "illustration", label: "二次元美图"),
+    AppleCategoryOption(id: "game", label: "游戏资源"), AppleCategoryOption(id: "onlineGame", label: "在线游戏"),
+    AppleCategoryOption(id: "other", label: "创作社区"), AppleCategoryOption(id: "live", label: "直播"),
+    AppleCategoryOption(id: "novel", label: "小说"), AppleCategoryOption(id: "tavern", label: "酒馆"),
+    AppleCategoryOption(id: "asmr", label: "音声")
+]
+
+@MainActor private struct AppleSettingsPanel: View {
+    @ObservedObject var access: LibraryAccess
+    let back: () -> Void
+    @State private var categories = Set(appleCategoryOptions.map { $0.id })
+
+    var body: some View {
+        Form {
+            HStack {
+                Button(access.tr("返回"), action: back)
+                Text(access.tr("应用设置")).font(.headline)
+            }
+            Section(header: Text(access.tr("隐私与安全"))) {
+                Toggle(access.tr("安全屏幕"), isOn: Binding(
+                    get: { access.privacy?.secureScreen == true },
+                    set: { value in Task { await access.updatePrivacy("secureScreen", enabled: value) } }
+                ))
+                Toggle(access.tr("应用锁"), isOn: Binding(
+                    get: { access.privacy?.appLock == true },
+                    set: { value in Task { await access.updatePrivacy("appLock", enabled: value) } }
+                ))
+                Toggle(access.tr("订阅通知"), isOn: Binding(
+                    get: { access.privacy?.subscriptionNotifications == true },
+                    set: { value in Task { await access.updatePrivacy("subscriptionNotifications", enabled: value) } }
+                ))
+                Toggle(access.tr("通知显示预览"), isOn: Binding(
+                    get: { access.privacy?.subscriptionNotificationPreview == true },
+                    set: { value in Task { await access.updatePrivacy("subscriptionNotificationPreview", enabled: value) } }
+                ))
+            }
+            Section(header: Text(access.tr("语言"))) {
+                Picker(access.tr("界面语言"), selection: Binding(
+                    get: { access.privacy?.language.flatMap { $0 == "system" ? nil : $0 } ?? "" },
+                    set: { value in
+                        guard let encoded = try? JSONEncoder().encode(value) else { return }
+                        Task { await access.updatePreference("language", json: String(decoding: encoded, as: UTF8.self)) }
+                    }
+                )) {
+                    Text(access.tr("跟随系统")).tag("")
+                    Text("简体中文").tag("zh-Hans")
+                    Text("繁體中文").tag("zh-Hant")
+                    Text("English").tag("en")
+                    Text("日本語").tag("ja")
+                    Text("한국어").tag("ko")
+                    Text("Español").tag("es")
+                    Text("Русский").tag("ru")
+                    Text("العربية").tag("ar")
+                }
+            }
+            Section(header: Text(access.tr("首页兴趣"))) {
+                ForEach(appleCategoryOptions) { option in
+                    Toggle(access.tr(option.label), isOn: Binding(
+                        get: { categories.contains(option.id) },
+                        set: { enabled in
+                            if enabled { categories.insert(option.id) }
+                            else { categories.remove(option.id) }
+                        }
+                    ))
+                }
+                Button(access.tr("保存")) {
+                    let selected: Set<String> = categories.count == appleCategoryOptions.count ? [] : categories
+                    let data = (try? JSONEncoder().encode(selected.sorted())) ?? Data("[]".utf8)
+                    let json = String(data: data, encoding: .utf8) ?? "[]"
+                    Task { await access.updatePreference("homeCategories", json: json) }
+                }.disabled(access.busy)
+            }
+            if access.failed { Text(access.tr("保存失败，请重试")) }
+        }
+        .disabled(access.busy)
+        .onAppear {
+            if let saved = access.privacy?.homeCategories, !saved.isEmpty { categories = Set(saved) }
+        }
+    }
+}
+
+@MainActor private struct AppleOnboardingPanel: View {
+    @ObservedObject var access: LibraryAccess
+    @State private var secureScreen = false
+    @State private var appLock = false
+    @State private var categories = Set(appleCategoryOptions.map { $0.id })
+
+    var body: some View {
+        Form {
+            Text(access.tr("首次使用设置")).font(.title2)
+            Text(access.tr("选择首页内容范围，并设置隐私保护选项。之后仍可在我的页面调整。"))
+                .foregroundColor(.secondary)
+            Section(header: Text(access.tr("隐私"))) {
+                Toggle(access.tr("安全屏幕"), isOn: $secureScreen)
+                Toggle(access.tr("应用锁"), isOn: $appLock)
+            }
+            Section(header: Text(access.tr("首页兴趣"))) {
+                ForEach(appleCategoryOptions) { option in
+                    Toggle(access.tr(option.label), isOn: Binding(
+                        get: { categories.contains(option.id) },
+                        set: { enabled in
+                            if enabled { categories.insert(option.id) }
+                            else { categories.remove(option.id) }
+                        }
+                    ))
+                }
+            }
+            if access.failed { Text(access.tr("保存失败，请重试")) }
+            Button(access.tr("完成设置")) {
+                let selected: Set<String> = categories.count == appleCategoryOptions.count ? [] : categories
+                Task { await access.finishOnboarding(categories: selected, secureScreen: secureScreen, appLock: appLock) }
+            }.disabled(access.busy)
+        }
+        .disabled(access.busy)
+        .onAppear {
+            secureScreen = access.privacy?.secureScreen == true
+            appLock = access.privacy?.appLock == true
+            if let saved = access.privacy?.homeCategories, !saved.isEmpty { categories = Set(saved) }
+        }
+    }
 }

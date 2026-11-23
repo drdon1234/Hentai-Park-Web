@@ -2079,5 +2079,13 @@
   "结构化输入": "Structured input",
   "后置指令": "Post-history instruction",
   "每行一个词条，按标题、关键词和正文填写": "One entry per line, with a title, keywords and content",
-  "浏览器离线。已载入的页面可以查看，读取实例文件和保存更改需要重新连接。": "Your browser is offline. You can view loaded pages. Reconnect to open files on the instance or save changes."
+  "浏览器离线。已载入的页面可以查看，读取实例文件和保存更改需要重新连接。": "Your browser is offline. You can view loaded pages. Reconnect to open files on the instance or save changes.",
+  "安全屏幕": "Secure screen",
+  "订阅通知": "Subscription notifications",
+  "通知显示预览": "Show notification previews",
+  "首次使用设置": "First-use setup",
+  "选择首页内容范围，并设置隐私保护选项。之后仍可在我的页面调整。": "Choose home content and privacy options. You can adjust them later in More.",
+  "隐私": "Privacy",
+  "首页兴趣": "Home interests",
+  "完成设置": "Finish setup"
 }

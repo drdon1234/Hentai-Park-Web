@@ -9,6 +9,7 @@ import AppKit
 #endif
 
 private struct PrivacyObscuredKey: EnvironmentKey { static let defaultValue = false }
+private struct CoverBlurKey: EnvironmentKey { static let defaultValue = false }
 #if os(iOS)
 private struct WindowSceneIdentifierKey: EnvironmentKey { static let defaultValue: String? = nil }
 private extension EnvironmentValues {
@@ -19,6 +20,10 @@ private extension EnvironmentValues {
 }
 #endif
 extension EnvironmentValues {
+    var blurCovers: Bool {
+        get { self[CoverBlurKey.self] }
+        set { self[CoverBlurKey.self] = newValue }
+    }
     var privacyObscured: Bool {
         get { self[PrivacyObscuredKey.self] }
         set { self[PrivacyObscuredKey.self] = newValue }
@@ -205,7 +210,7 @@ struct ParkApp: App {
         } catch { failed = true }
     }
 
-    func finishOnboarding(categories: Set<String>, secureScreen: Bool, appLock: Bool) async {
+    func finishOnboarding(categories: Set<String>, secureScreen: Bool, appLock: Bool, blurCovers: Bool) async {
         guard !busy else { return }
         busy = true
         failed = false
@@ -216,7 +221,7 @@ struct ParkApp: App {
             }
             let session = try await ProgressSession.openApplicationLibrary()
             do {
-                try await session.completeOnboarding(categories: categories.sorted(), secureScreen: secureScreen, appLock: appLock)
+                try await session.completeOnboarding(categories: categories.sorted(), secureScreen: secureScreen, appLock: appLock, blurCovers: blurCovers)
                 privacy = try await session.privacySettings()
             } catch { await session.close(); throw error }
             await session.close()
@@ -278,6 +283,7 @@ struct ParkApp: App {
                     let hide = (inactive && (settings.secureScreen == true || settings.appLock == true))
                         || (captured && settings.secureScreen == true)
                     LibraryWindow(access: access)
+                        .environment(\.blurCovers, settings.blurCovers == true)
                         .environment(\.privacyObscured,hide)
                         .opacity(hide ? 0 : 1).accessibilityHidden(hide).allowsHitTesting(!hide)
                 }
@@ -413,7 +419,8 @@ private final class LibraryModel: ObservableObject {
     @State private var group = 0
     @State private var retry = 0
     private enum Destination {
-        case sites, search, subscriptions, updates, rankings, recordings, settings
+        case sites, manageSites, search, subscriptions, updates, rankings, recordings, settings
+        case site(InstalledSite)
         case work(LibraryWork), chapter(ChapterKey)
     }
     @State private var destination: Destination?
@@ -537,6 +544,7 @@ private final class LibraryModel: ObservableObject {
         if index == 3 {
             List {
                 Button(access.tr("应用设置")) { destination = .settings }
+                Button(access.tr("站点管理")) { destination = .manageSites }
                 Toggle(access.tr("无痕模式"), isOn: Binding(get: { access.privacy?.incognito == true }, set: { enabled in
                     Task { await access.setIncognito(enabled) }
                 })).disabled(access.busy)
@@ -625,6 +633,10 @@ private final class LibraryModel: ObservableObject {
                         }.accessibilityElement(children: .contain)
                     }
                 }
+                if index == 0, let session = model.session, let library = InstalledSources.library {
+                    HomeSiteGroups(session: session, library: library, interests: access.privacy?.homeCategories ?? [],
+                        tr: access.tr) { destination = .site($0) }
+                }
             }
         } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
     }
@@ -646,6 +658,11 @@ private final class LibraryModel: ObservableObject {
             AppleSettingsPanel(access: access, back: leaveChapter)
         } else if case .sites? = destination, let session = model.session {
             SourceDirectory(session:session, locale:access.locale, incognito:access.privacy?.incognito==true, tr:access.tr, close:leaveChapter)
+        } else if case .manageSites? = destination, let session = model.session, let library = InstalledSources.library {
+            SiteOrderView(session: session, library: library, tr: access.tr, back: leaveChapter)
+        } else if case .site(let site)? = destination, let session = model.session, let library = InstalledSources.library {
+            SourceResults(session: session, library: library, site: site, locale: access.locale,
+                incognito: access.privacy?.incognito == true, tr: access.tr, close: leaveChapter).id(site.id)
         } else if case .work(let onlineWork)? = destination, let session = model.session {
             StoredSiteDetails(session:session,work:onlineWork,locale:access.locale,incognito:access.privacy?.incognito==true,tr:access.tr,back:leaveChapter).id(onlineWork)
         } else if case .chapter(let key)? = destination, let session = model.session, let work = model.works?.first(where: {
@@ -813,6 +830,38 @@ private let appleCategoryOptions: [AppleCategoryOption] = [
     AppleCategoryOption(id: "asmr", label: "音声")
 ]
 
+@MainActor private struct HomeSiteGroups: View {
+    let session: ProgressSession
+    let library: SourceLibrary
+    let interests: [String]
+    let tr: (String) -> String
+    let open: (InstalledSite) -> Void
+    @State private var sites: [InstalledSite] = []
+    @State private var failed = false
+    @State private var attempt = 0
+
+    var body: some View {
+        Section(header: Text(tr("首页兴趣"))) {
+            if failed { Button(tr("站点加载失败，请重试")) { attempt += 1 } }
+            ForEach(appleCategoryOptions) { option in
+                let rows = sites.filter { $0.category == option.id }
+                if !rows.isEmpty && (interests.isEmpty || interests.contains(option.id)) {
+                    DisclosureGroup(tr(option.label)) {
+                        ForEach(rows) { site in Button(site.name ?? site.key) { open(site) } }
+                    }
+                }
+            }
+        }.task(id: attempt) {
+            do {
+                let values = try await session.sites(library)
+                try Task.checkCancellation()
+                sites = values
+                failed = false
+            } catch { if !Task.isCancelled { failed = true } }
+        }
+    }
+}
+
 @MainActor private struct AppleSettingsPanel: View {
     @ObservedObject var access: LibraryAccess
     let back: () -> Void
@@ -825,6 +874,10 @@ private let appleCategoryOptions: [AppleCategoryOption] = [
                 Text(access.tr("应用设置")).font(.headline)
             }
             Section(header: Text(access.tr("隐私与安全"))) {
+                Toggle(access.tr("模糊封面"), isOn: Binding(
+                    get: { access.privacy?.blurCovers == true },
+                    set: { value in Task { await access.updatePrivacy("blurCovers", enabled: value) } }
+                ))
                 Toggle(access.tr("安全屏幕"), isOn: Binding(
                     get: { access.privacy?.secureScreen == true },
                     set: { value in Task { await access.updatePrivacy("secureScreen", enabled: value) } }
@@ -889,6 +942,7 @@ private let appleCategoryOptions: [AppleCategoryOption] = [
 
 @MainActor private struct AppleOnboardingPanel: View {
     @ObservedObject var access: LibraryAccess
+    @State private var blurCovers = false
     @State private var secureScreen = false
     @State private var appLock = false
     @State private var categories = Set(appleCategoryOptions.map { $0.id })
@@ -899,6 +953,7 @@ private let appleCategoryOptions: [AppleCategoryOption] = [
             Text(access.tr("选择首页内容范围，并设置隐私保护选项。之后仍可在我的页面调整。"))
                 .foregroundColor(.secondary)
             Section(header: Text(access.tr("隐私"))) {
+                Toggle(access.tr("模糊封面"), isOn: $blurCovers)
                 Toggle(access.tr("安全屏幕"), isOn: $secureScreen)
                 Toggle(access.tr("应用锁"), isOn: $appLock)
             }
@@ -916,12 +971,13 @@ private let appleCategoryOptions: [AppleCategoryOption] = [
             if access.failed { Text(access.tr("保存失败，请重试")) }
             Button(access.tr("完成设置")) {
                 let selected: Set<String> = categories.count == appleCategoryOptions.count ? [] : categories
-                Task { await access.finishOnboarding(categories: selected, secureScreen: secureScreen, appLock: appLock) }
+                Task { await access.finishOnboarding(categories: selected, secureScreen: secureScreen, appLock: appLock, blurCovers: blurCovers) }
             }.disabled(access.busy || categories.isEmpty)
         }
         .disabled(access.busy)
         .onAppear {
             secureScreen = access.privacy?.secureScreen == true
+            blurCovers = access.privacy?.blurCovers == true
             appLock = access.privacy?.appLock == true
             if let saved = access.privacy?.homeCategories, !saved.isEmpty { categories = Set(saved) }
         }

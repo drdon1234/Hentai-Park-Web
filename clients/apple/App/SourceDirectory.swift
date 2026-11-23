@@ -70,7 +70,7 @@ enum InstalledSources {
   }
 }
 
-@MainActor private struct SiteOrderView: View {
+@MainActor struct SiteOrderView: View {
   let session: ProgressSession
   let library: SourceLibrary
   let tr: (String) -> String
@@ -127,7 +127,7 @@ enum InstalledSources {
   }
 }
 
-@MainActor private struct SourceResults: View {
+@MainActor struct SourceResults: View {
   let session: ProgressSession
   let library: SourceLibrary
   let site: InstalledSite
@@ -350,6 +350,7 @@ enum InstalledSources {
 
 @MainActor struct SiteDetails: View {
   @EnvironmentObject private var recorder: BroadcastRecorder
+  @Environment(\.blurCovers) private var blurCovers
   let session: ProgressSession
   let library: SourceLibrary
   let site: InstalledSite
@@ -427,6 +428,7 @@ enum InstalledSources {
             if let subtitle = detail.subtitle { Text(subtitle) }
             if let cover {
               Image(decorative: cover, scale: 1).resizable().scaledToFit().frame(maxHeight: 360)
+                .blur(radius: blurCovers ? 18 : 0).clipped()
             } else if imageFailed {
               Button(tr("重试")) { imageAttempt += 1 }
             }

@@ -7,6 +7,7 @@ public struct LibraryPrivacy: Decodable, Sendable {
     public let appLock: Bool?
     public let appLockAfter: Int?
     public let secureScreen: Bool?
+    public let blurCovers: Bool?
     public let language: String?
     public let subscriptionUpdateHours: Int?
     public let subscriptionNotifications: Bool?
@@ -105,7 +106,7 @@ public actor ProgressSession {
     }
 
     public func setPrivacyPreference(_ name: String, enabled: Bool) async throws {
-        guard ["secureScreen", "appLock", "subscriptionNotifications", "subscriptionNotificationPreview"].contains(name) else {
+        guard ["blurCovers", "secureScreen", "appLock", "subscriptionNotifications", "subscriptionNotificationPreview"].contains(name) else {
             throw CocoaError(.coderInvalidValue)
         }
         try await run { store, _ in try store.savePreference(name: name, json: enabled ? "true" : "false") }
@@ -118,10 +119,11 @@ public actor ProgressSession {
         try await run { store, _ in try store.savePreference(name: name, json: json) }
     }
 
-    public func completeOnboarding(categories: [String], secureScreen: Bool, appLock: Bool) async throws {
+    public func completeOnboarding(categories: [String], secureScreen: Bool, appLock: Bool, blurCovers: Bool = false) async throws {
         let json = String(decoding: try JSONEncoder().encode(categories), as: UTF8.self)
         try await run { store, _ in
             try store.savePreference(name: "homeCategories", json: json)
+            try store.savePreference(name: "blurCovers", json: blurCovers ? "true" : "false")
             try store.savePreference(name: "secureScreen", json: secureScreen ? "true" : "false")
             try store.savePreference(name: "appLock", json: appLock ? "true" : "false")
             try store.savePreference(name: "onboarded", json: "true")

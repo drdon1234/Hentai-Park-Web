@@ -189,21 +189,21 @@ jobs:
               raise SystemExit("构建运行与指定候选或工作流不一致")
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
-                                     "e69ce1c18bd4ee6317e3600a10cd5309a054326a315848540d2e263cd97d1f24" if os.environ["EXERCISE_SCOPE"] == "tavern" else
-                                     "a2f728eca019795bcc11daecb1b580dea6cf59aa1e156ba224133910e44c0d4e" if os.environ["EXERCISE_SCOPE"] == "pictures" else
-                                     "35eab0623a65d9ad9ac6c330d44e449b257564bcbba87f6aa1e5dcf125a43299" if os.environ["EXERCISE_SCOPE"] == "reading" else
-                                     "35eab0623a65d9ad9ac6c330d44e449b257564bcbba87f6aa1e5dcf125a43299" if os.environ["EXERCISE_SCOPE"] == "domains" else
-                                     "873b7114143ce655d57ef8fd76f480fc3d7e5fb36a5619b4d89fb9ed941b6f08" if os.environ["EXERCISE_SCOPE"] == "audio" else
-                                     "31de0001d14bf4b90a451f4182939a2ae184136391f3b4f2c3a5797f72b20c1c" if os.environ["EXERCISE_SCOPE"] == "game" else
-                                     "043039cb625eb8c271555735600434d158d4a7f43625d483c142e37cec949092" if os.environ["EXERCISE_SCOPE"] == "movie" else
-                                     "17b0491b1ae11cb72b039b021635156aeeedf9d7613a269a8d1d72466ce934fe" if os.environ["EXERCISE_SCOPE"] == "record" else
-                                     "4dfdb7415aa01213143cc43b9a71deca3c43866992cfa8606e6248b1343c6baf" if os.environ["EXERCISE_SCOPE"] == "native" else
-                                     "66d75a378f706918a7d039cbea290abf2cfb96806d1c216cf3a1d82a36dc1707" if os.environ["EXERCISE_SCOPE"] == "review" else
-                                     "2973acf106b0eb7e946de6c13e1526347ad307547b382c95db94f9af47cb61e9" if os.environ["EXERCISE_SCOPE"] == "write" else
-                                     "b43f563225bb2e85463d1ee8ed2d8a8cb1f0f06596d7366cd422e783703d5f5b" if os.environ["EXERCISE_SCOPE"] in ("capture","layout") else
-                                     "7307a73c23ecb0ebe5c77793de7c8437704f1b1a2bd36e2c09baccc92ff8e9ea" if os.environ["EXERCISE_SCOPE"] == "queue" else
-                                     "7262ea068ca24171c4784704930ae5ead01a83f2290dd2f3d5766afde2e4c249" if os.environ["EXERCISE_SCOPE"] == "media" else
-                                     "5a21d497ee7b4e701f05448dd357fdde5d4a79ad97c4bf14b12fff0cf8b109b9"):
+                                     "0b2ce736b32763860e1c9cf40acb50c5e705910d23b15c4753298e6c4cb74dc9" if os.environ["EXERCISE_SCOPE"] == "tavern" else
+                                     "675a98980399e8f424664539dc13cd82273801a827d81cc7eb8b3da03cc77231" if os.environ["EXERCISE_SCOPE"] == "pictures" else
+                                     "cd53643f9d5ae741b2c41527e9c893eaca11f1fcc258eb0dbbfc8ba4e67f4ea5" if os.environ["EXERCISE_SCOPE"] == "reading" else
+                                     "cd53643f9d5ae741b2c41527e9c893eaca11f1fcc258eb0dbbfc8ba4e67f4ea5" if os.environ["EXERCISE_SCOPE"] == "domains" else
+                                     "70c3f52c86028bc652e60116e08790b6b25934a71c6d925bcfbef6fb1c942f52" if os.environ["EXERCISE_SCOPE"] == "audio" else
+                                     "df8ca23dcf7dcfcf6d5bd6add529461da9f87833b9cf56b0a3fad8f8cb1c30f9" if os.environ["EXERCISE_SCOPE"] == "game" else
+                                     "d4cdbb755b02021d8caf911fdde3e9d60e0d65f7e81ef1b9f196125e89b42234" if os.environ["EXERCISE_SCOPE"] == "movie" else
+                                     "4eb1916eaa9a069036187764ea19d94787042199139ad2a2acf33bf207c572bb" if os.environ["EXERCISE_SCOPE"] == "record" else
+                                     "efbdf5631d37d83a672d6253bfbaf81356bb7f9d035d9920c8cc50e350891ef4" if os.environ["EXERCISE_SCOPE"] == "native" else
+                                     "5fdb068d64b89ac940d866eb6167b66a6eeed28902ff83fbfada2faa8f9442cb" if os.environ["EXERCISE_SCOPE"] == "review" else
+                                     "bd1c214f5e0397c1433247be1622b1a1080947c3a764c211ed880bfe38318f85" if os.environ["EXERCISE_SCOPE"] == "write" else
+                                     "a7d90d961e0d02a256865f2e881cef0d5279930e1df30869a0b22564ef007410" if os.environ["EXERCISE_SCOPE"] in ("capture","layout") else
+                                     "e30a8dba8f2eb14637bf5e349b431d372c4b0edf32ca57b85599b13fb0950f71" if os.environ["EXERCISE_SCOPE"] == "queue" else
+                                     "28935d4118426ff137a68989b9c0081e9dd90f52fcb489713407235a27f1d3e0" if os.environ["EXERCISE_SCOPE"] == "media" else
+                                     "32a789336586216e79c700851042714c21a0aebdccbe9dcac32eac04068e7b9f"):
               raise SystemExit("验收文件摘要与工作流核定值不一致")
           pathlib.Path("test/reader_flow.py").write_bytes(raw)
           PY

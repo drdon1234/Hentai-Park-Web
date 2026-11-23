@@ -1,5 +1,6 @@
 import ParkCore
 import SwiftUI
+import ImageIO
 
 extension Notification.Name {
   static let parkSiteOrderChanged = Notification.Name("ParkSiteOrderChanged")
@@ -529,6 +530,15 @@ enum InstalledSources {
   @State private var detail: SiteWork?
   @State private var work: LibraryWork?
   @State private var chapter: ChapterKey?
+  @State private var previewPage: Int?
+  @State private var previewsExpanded = false
+  @State private var previews: [SiteThumbnail] = []
+  @State private var previewBatch = 0
+  @State private var previewHasNext = false
+  @State private var previewAttempt = 0
+  @State private var lastPreviewAttempt = 0
+  @State private var previewBusy = false
+  @State private var previewError: String?
   @State private var resumedChapter: String?
   @State private var progressReady = false
   @State private var progressFailed = false
@@ -580,7 +590,7 @@ enum InstalledSources {
       } else {
         PageReader(
           incognito: incognito, tr: tr, session: session, key: chapter, work: work, showBack: true,
-          back: { self.chapter = nil }, library: library
+          back: { self.chapter = nil; previewPage = nil }, library: library, initialPage: previewPage
         ).id(chapter)
       }
     } else {
@@ -712,6 +722,39 @@ enum InstalledSources {
                   chapter = ChapterKey(source: site.key, workId: work.workId, chapterId: row.id)
                 }
               }
+              if work.media == "comic", let first = work.chapters.first, !previews.isEmpty || previewHasNext {
+                DisclosureGroup(tr("预览"), isExpanded: $previewsExpanded) {
+                  if previewsExpanded {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 82, maximum: 140))]) {
+                      ForEach(Array(previews.enumerated()), id: \.offset) { ordinal, item in
+                        let page = item.index.flatMap { $0 >= 0 ? $0 : nil } ?? ordinal
+                        Button {
+                          let target = work.chapters.first { $0.id == resumedChapter } ?? first
+                          previewPage = page
+                          chapter = ChapterKey(source: site.key, workId: work.workId, chapterId: target.id)
+                        } label: {
+                          VStack {
+                            DetailThumbnail(session: session, library: library, source: site.key, item: item)
+                            Text(String(UInt(page) + 1))
+                          }
+                        }.disabled(!progressReady)
+                        .accessibilityLabel(tr("第 {value0} 页").replacingOccurrences(of: "{value0}", with: String(UInt(page) + 1)))
+                      }
+                    }
+                    if previewHasNext {
+                      if let previewError { Text(tr(previewError)) }
+                      Button(tr(previewError == nil ? "加载更多预览" : "重试")) {
+                        previewAttempt += 1
+                      }.disabled(previewBusy)
+                      .task(id: previewAttempt) {
+                        guard previewAttempt != lastPreviewAttempt else { return }
+                        lastPreviewAttempt = previewAttempt
+                        await morePreviews(detail)
+                      }
+                    }
+                  }
+                }
+              }
             }
             if site.comments && detail.allowsComments {
               DetailEntriesPanel(session: session, library: library, site: site, work: detail, kind: .comments,
@@ -767,6 +810,9 @@ enum InstalledSources {
           library, site: site, item: found, incognito: incognito)
         if opened.media == "article" { article = try found.articleBlocks() }
         work = opened
+        previews = Array((found.thumbnails ?? []).prefix(20))
+        previewHasNext = (found.thumbnails?.count ?? 0) > previews.count ||
+          (site.thumbnails && (found.thumbnailsTotal.map { $0 > previews.count } ?? true))
         detail = found
         if let startChapter, work?.chapters.contains(where: { $0.id == startChapter }) == true {
           chapter = ChapterKey(source: site.key, workId: workId, chapterId: startChapter)
@@ -777,6 +823,69 @@ enum InstalledSources {
       SiteSettingsPage(session: session, library: library, site: site, locale: locale, tr: tr, signedIn: {
         showLogin = false; attempt += 1
       })
+    }
+  }
+
+  private func morePreviews(_ detail: SiteWork) async {
+    previewBusy = true
+    defer { previewBusy = false }
+    previewError = nil
+    let local = detail.thumbnails ?? []
+    if previews.count < local.count {
+      previews = Array(local.prefix(previews.count + 40))
+      previewHasNext = previews.count < local.count || (site.thumbnails && (detail.thumbnailsTotal.map { $0 > previews.count } ?? true))
+      return
+    }
+    do {
+      let batch = try await prompt.perform {
+        try await session.siteThumbnails(library, site: site.key, work: workId, page: previewBatch + 1, confirmation: $0)
+      }
+      try Task.checkCancellation()
+      var indexed = Set(previews.compactMap(\.index))
+      var others = Set(previews.filter { $0.index == nil })
+      previews.append(contentsOf: batch.thumbnails.filter { item in
+        if let index = item.index { return indexed.insert(index).inserted }
+        return others.insert(item).inserted
+      })
+      previewBatch += 1
+      previewHasNext = batch.hasNext == true
+    } catch { if !Task.isCancelled { previewError = siteMessage(error) } }
+  }
+}
+
+@MainActor private struct DetailThumbnail: View {
+  let session: ProgressSession
+  let library: SourceLibrary
+  let source: String
+  let item: SiteThumbnail
+  @State private var image: CGImage?
+
+  var body: some View {
+    Group {
+      if let image { Image(decorative: image, scale: 1).resizable().scaledToFit() }
+      else { Image(systemName: "photo").foregroundStyle(.secondary) }
+    }.frame(height: 90).accessibilityHidden(true)
+    .task(id: item) {
+      guard image == nil else { return }
+      do {
+        let asset = try await session.siteImage(library, site: source, address: item.url)
+        let result: CGImage
+        if let width = item.width, let height = item.height, width > 0, height > 0,
+          item.offsetX != nil || item.offsetY != nil {
+          result = try await Task.detached {
+            try withExtendedLifetime(asset) {
+              let url = URL(fileURLWithPath: try asset.path())
+              let box = CGRect(x: item.offsetX ?? 0, y: item.offsetY ?? 0, width: width, height: height)
+              guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                    let sprite = CGImageSourceCreateImageAtIndex(source, 0, nil),
+                    let tile = sprite.cropping(to: box) else { throw CocoaError(.fileReadCorruptFile) }
+              return tile
+            }
+          }.value
+        } else { result = try await decodedPage(asset, maxSize: 320) }
+        try Task.checkCancellation()
+        image = result
+      } catch { }
     }
   }
 }

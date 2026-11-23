@@ -729,6 +729,7 @@ private final class LibraryModel: ObservableObject {
     let showBack: Bool
     let back: () -> Void
     var library:SourceLibrary? = nil
+    var initialPage: Int? = nil
     @State private var images: ChapterImages?
     @State private var image: CGImage?
     @State private var current: Int32 = 0
@@ -788,6 +789,7 @@ private final class LibraryModel: ObservableObject {
             guard total > 0 else { throw CocoaError(.fileReadCorruptFile) }
             let index: Int32
             if let requested { index = requested }
+            else if let initialPage, count == 0 { index = Int32(clamping: min(max(initialPage, 0), Int(total - 1))) }
             else {
                 let previous = try await session.read(key)
                 let history = work.historyChapter == key.chapterId ? work.historyPage : 0
@@ -796,7 +798,7 @@ private final class LibraryModel: ObservableObject {
             let asset = try await session.pageImage(chapter, index: index)
             let pixels = try await decodedPage(asset,maxSize:4096)
             try Task.checkCancellation()
-            if requested != nil && !incognito {
+            if (requested != nil || (initialPage != nil && count == 0)) && !incognito {
                 let turn = PageTurn(key: key, historyChapterId: key.chapterId,
                     chapterTitle: work.chapters.first(where: { $0.id == key.chapterId })?.title,
                     pageIndex: Int64(index), pageCount: Int64(total), updatedMs: Int64(Date().timeIntervalSince1970 * 1000))

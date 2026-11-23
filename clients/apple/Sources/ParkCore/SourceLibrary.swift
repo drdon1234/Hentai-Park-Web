@@ -65,6 +65,7 @@ public struct InstalledSite: Identifiable, Sendable {
   public let detail: Bool
   public let comments: Bool
   public let related: Bool
+  public let thumbnails: Bool
   public let nativeVideo: Bool
   public let unavailable: Bool?
   let rankings: Bool
@@ -85,6 +86,7 @@ public struct InstalledSite: Identifiable, Sendable {
     detail = site["detail"] as? Bool == true
     comments = site["comments"] as? Bool == true
     related = site["related"] as? Bool == true
+    thumbnails = site["thumbnails"] as? Bool == true
     nativeVideo = site["nativeVideo"] as? Bool == true
     unavailable = site["unavailable"] as? Bool
     rankings = site["rankings"] as? Bool == true
@@ -183,6 +185,34 @@ public enum SiteLinkTarget: Sendable {
   case external(URL)
 }
 
+public struct SiteThumbnail: Decodable, Hashable, Sendable {
+  public let url: String
+  public let index: Int?
+  public let offsetX, offsetY, width, height: Double?
+
+  private enum Keys: String, CodingKey { case url, index, offsetX, offsetY, width, height }
+  public init(from decoder: Decoder) throws {
+    if let address = try? decoder.singleValueContainer().decode(String.self) {
+      url = address
+      index = nil
+      offsetX = nil; offsetY = nil; width = nil; height = nil
+    } else {
+      let value = try decoder.container(keyedBy: Keys.self)
+      url = try value.decode(String.self, forKey: .url)
+      index = try value.decodeIfPresent(Int.self, forKey: .index)
+      offsetX = try value.decodeIfPresent(Double.self, forKey: .offsetX)
+      offsetY = try value.decodeIfPresent(Double.self, forKey: .offsetY)
+      width = try value.decodeIfPresent(Double.self, forKey: .width)
+      height = try value.decodeIfPresent(Double.self, forKey: .height)
+    }
+  }
+}
+
+public struct SiteThumbnailPage: Decodable, Sendable {
+  public let thumbnails: [SiteThumbnail]
+  public let hasNext: Bool?
+}
+
 public struct SiteWork: Decodable, Identifiable, Sendable {
   public struct Chapter: Decodable, Identifiable, Sendable {
     public let id: String
@@ -208,6 +238,8 @@ public struct SiteWork: Decodable, Identifiable, Sendable {
   public fileprivate(set) var variants: [SiteWork] = []
   public let chapters: [Chapter]?
   public let chaptersComplete: Bool?
+  public let thumbnails: [SiteThumbnail]?
+  public let thumbnailsTotal: Int?
   public let singleChapterId: String?
   public let voiceRoot: VoiceNode?
   let voiceMediaForm: String?
@@ -233,6 +265,7 @@ public struct SiteWork: Decodable, Identifiable, Sendable {
     case id, title, subtitle, description, cover, chapters, chaptersComplete, singleChapterId
     case tagGroups = "tags"
     case workCode, editions, authors, authorSearch
+    case thumbnails, thumbnailsTotal
     case voiceRoot, voiceMediaForm, voiceTrackKinds, voiceSubtitles
   }
 }
@@ -293,9 +326,21 @@ extension ProgressSession {
   public func comicPages(_ library: SourceLibrary, key: ChapterKey) async throws -> ChapterImages {
     let root = directory
     return try await run { store, request in
-      try library.service(directory: root, request: request).comicChapter(
-        store: store, key: key, request: request)
+      let cache = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+      do { return try store.chapterImages(key: key, cacheDirectory: cache.path) }
+      catch StorageError.UnavailableDownload {
+        return try library.service(directory: root, request: request).comicChapter(
+          store: store, key: key, request: request)
+      }
     }
+  }
+
+  public func siteThumbnails(_ library: SourceLibrary, site: String, work: String, page: Int,
+    confirmation: ManualRead? = nil) async throws -> SiteThumbnailPage {
+    let arguments = try JSONSerialization.data(withJSONObject: [work, page])
+    let raw = try await siteRead(library, site: site, method: .thumbnails,
+      arguments: String(decoding: arguments, as: UTF8.self), confirmation: confirmation)
+    return try JSONDecoder().decode(SiteThumbnailPage.self, from: Data(raw.utf8))
   }
 
   public func sourceNovel(_ library: SourceLibrary, key: ChapterKey, locale: String, engine: String)

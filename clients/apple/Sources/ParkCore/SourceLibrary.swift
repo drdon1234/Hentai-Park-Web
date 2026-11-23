@@ -105,30 +105,42 @@ public struct InstalledSite: Identifiable, Sendable {
   }
 }
 
-private struct SiteWorkTag: Decodable, Sendable {
-  let values: [String]
-  private enum Keys: String, CodingKey { case namespace, tags, name }
+public struct DetailSearchTag: Hashable, Sendable, Decodable {
+  public let name: String
+  public let keyword: String
+  public let filters: [String: PluginOptionValue]
+  private enum Keys: String, CodingKey { case name, keyword, filters }
 
-  private struct Name: Decodable {
-    let text: String
-    init(from decoder: Decoder) throws {
-      if let value = try? decoder.singleValueContainer().decode(String.self) {
-        text = value
-      } else {
-        text = try decoder.container(keyedBy: Keys.self).decode(String.self, forKey: .name)
-      }
-    }
+  public init(name: String, keyword: String? = nil, filters: [String: PluginOptionValue] = [:]) {
+    self.name = name
+    self.keyword = keyword ?? name
+    self.filters = filters
   }
 
+  public init(from decoder: Decoder) throws {
+    if let text = try? decoder.singleValueContainer().decode(String.self) {
+      self.init(name: text)
+    } else {
+      let values = try decoder.container(keyedBy: Keys.self)
+      self.init(name: try values.decode(String.self, forKey: .name),
+        keyword: try values.decodeIfPresent(String.self, forKey: .keyword),
+        filters: try values.decodeIfPresent([String: PluginOptionValue].self, forKey: .filters) ?? [:])
+    }
+  }
+}
+
+private struct SiteWorkTag: Decodable, Sendable {
+  let namespace: String
+  let entries: [DetailSearchTag]
+  private enum Keys: String, CodingKey { case namespace, tags }
   init(from decoder: Decoder) throws {
     if let flat = try? decoder.singleValueContainer().decode(String.self) {
-      values = [flat]
+      namespace = ""
+      entries = [DetailSearchTag(name: flat)]
     } else {
       let group = try decoder.container(keyedBy: Keys.self)
-      let namespace = try group.decodeIfPresent(String.self, forKey: .namespace) ?? ""
-      values = try group.decode([Name].self, forKey: .tags).map { tag in
-        namespace.isEmpty ? tag.text : namespace + ":" + tag.text
-      }
+      namespace = try group.decodeIfPresent(String.self, forKey: .namespace) ?? ""
+      entries = try group.decode([DetailSearchTag].self, forKey: .tags)
     }
   }
 }
@@ -173,7 +185,13 @@ public struct SiteWork: Decodable, Identifiable, Sendable {
   public fileprivate(set) var commentURL: String?
   public let cover: String?
   private let tagGroups: [SiteWorkTag]?
-  public var tags: [String]? { tagGroups?.flatMap(\.values) }
+  public var tags: [String]? {
+    tagGroups?.flatMap { group in group.entries.map { group.namespace.isEmpty ? $0.name : group.namespace + ":" + $0.name } }
+  }
+  public var searchTags: [DetailSearchTag] { tagGroups?.flatMap(\.entries) ?? [] }
+  public let workCode: String?
+  public let editions: [String]?
+  public fileprivate(set) var variants: [SiteWork] = []
   public let chapters: [Chapter]?
   public let chaptersComplete: Bool?
   public let singleChapterId: String?
@@ -200,6 +218,7 @@ public struct SiteWork: Decodable, Identifiable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case id, title, subtitle, description, cover, chapters, chaptersComplete, singleChapterId
     case tagGroups = "tags"
+    case workCode, editions
     case voiceRoot, voiceMediaForm, voiceTrackKinds, voiceSubtitles
   }
 }
@@ -438,7 +457,7 @@ extension ProgressSession {
 
   public func sitePage(
     _ library: SourceLibrary, site: InstalledSite, keyword: String, page: Int, cursor: String?,
-    feedKey: String? = nil, values: [String: PluginOptionValue]? = nil,
+    feedKey: String? = nil, values: [String: PluginOptionValue]? = nil, filterSearch: Bool = false,
     common: [String: [String: PluginOptionValue]] = [:], confirmation: ManualRead? = nil
   ) async throws -> SiteWorkPage {
     var request: [String: Any] = ["page": page]
@@ -447,7 +466,7 @@ extension ProgressSession {
     let options = try values.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) }
     let args: [Any]
     let method: BrowseMethod
-    if !keyword.isEmpty, site.search == true {
+    if !keyword.isEmpty || filterSearch, site.search == true {
       request["keyword"] = keyword
       request["filters"] = options
       args = [request]
@@ -560,6 +579,10 @@ extension ProgressSession {
       work.allowsComments = flag.boolValue
     }
     work.commentURL = fields["url"] as? String
+    if let variants = fields["variants"] as? [[String: Any]], !variants.isEmpty {
+      let page = try JSONSerialization.data(withJSONObject: ["items": variants])
+      work.variants = try await decodeSitePage(String(decoding: page, as: UTF8.self), source: site, cursor: nil).items
+    }
     if let related = fields["related"] as? [[String: Any]], !related.isEmpty {
       let page = try JSONSerialization.data(withJSONObject: ["items": related])
       work.recommendations = try await decodeSitePage(String(decoding: page, as: UTF8.self), source: site, cursor: nil).items

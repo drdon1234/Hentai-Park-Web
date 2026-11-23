@@ -287,7 +287,9 @@ enum InstalledSources {
   let locale: String
   let incognito: Bool
   let tr: (String) -> String
+  var startingTag: DetailSearchTag? = nil
   let close: () -> Void
+  @State private var filterSearch = false
   @State private var input = ""
   @State private var keyword = ""
   @State private var works: [SiteWork] = []
@@ -310,19 +312,20 @@ enum InstalledSources {
   @StateObject private var filterPrompt = SitePrompt()
 
   private var feed: String? { chosenFeed ?? site.entryFeed?.key }
-  private var scope: String { keyword.isEmpty ? "feed:" + (feed ?? "") : "search" }
+  private var searching: Bool { !keyword.isEmpty || filterSearch }
+  private var scope: String { !searching ? "feed:" + (feed ?? "") : "search" }
   private var commonRules: [String: SiteCommonRule] {
-    if !keyword.isEmpty { return catalog?.searchCommonFilters ?? [:] }
+    if searching { return catalog?.searchCommonFilters ?? [:] }
     return catalog?.feeds.first { $0.key == feed }?.commonFilters ?? [:]
   }
   private var sharedDimensions: Set<String> {
-    guard keyword.isEmpty, let catalog, catalog.feeds.count > 1 else { return [] }
+    guard !searching, let catalog, catalog.feeds.count > 1 else { return [] }
     return Set(commonRules.keys.filter { dimension in
       catalog.feeds.allSatisfy { $0.commonFilters?[dimension] == commonRules[dimension] }
     })
   }
   private var definitions: [PluginOption] {
-    if !keyword.isEmpty { return catalog?.searchFilters ?? [] }
+    if searching { return catalog?.searchFilters ?? [] }
     return catalog?.feeds.first { $0.key == feed }?.options ?? []
   }
 
@@ -347,7 +350,7 @@ enum InstalledSources {
             }.padding(.horizontal)
           }
           HStack {
-            if keyword.isEmpty, let catalog, catalog.feeds.count > 1 {
+            if !searching, let catalog, catalog.feeds.count > 1 {
               Menu {
                 ForEach(catalog.feeds) { channel in
                   Button(catalog.localized(channel.label ?? channel.key)) {
@@ -394,8 +397,14 @@ enum InstalledSources {
           let options = try await session.browseOptions(library, site: site.key, locale: locale)
           try Task.checkCancellation()
           catalog = options
+          if let startingTag {
+            input = startingTag.keyword
+            keyword = startingTag.keyword
+            filterSearch = !startingTag.filters.isEmpty
+            filters["search"] = SiteBrowseOptions.defaults(options.searchFilters).merging(startingTag.filters) { _, value in value }
+          }
         }
-        if keyword.isEmpty && feed == nil {
+        if !searching && feed == nil {
           loading = false
           delivered = attempt
           return
@@ -403,7 +412,7 @@ enum InstalledSources {
         let result = try await prompt.perform { ticket in
           try await session.sitePage(
             library, site: site, keyword: keyword, page: page, cursor: cursor, feedKey: feed,
-            values: filters[scope] ?? SiteBrowseOptions.defaults(definitions),
+            values: filters[scope] ?? SiteBrowseOptions.defaults(definitions), filterSearch: filterSearch,
             common: try SiteCommonRule.validated(limits[scope] ?? [:], rules: commonRules), confirmation: ticket)
         }
         try Task.checkCancellation()
@@ -420,7 +429,7 @@ enum InstalledSources {
         PluginFilterForm(localize: catalog.localized, definitions: definitions,
                          values: filters[scope] ?? SiteBrowseOptions.defaults(definitions), tr: tr,
                          query: { option, values in
-                           SiteFilterQuery(source: site.key, feed: keyword.isEmpty ? feed : nil,
+                           SiteFilterQuery(source: site.key, feed: !searching ? feed : nil,
                                            keyword: keyword, option: option, values: values, definitions: definitions)
                          }, load: { query in
                            try await filterPrompt.perform { ticket in
@@ -449,6 +458,7 @@ enum InstalledSources {
       SiteBrowseOptions.reset(dependent, in: catalog.searchFilters, values: &values)
       filters["search"] = values
     }
+    filterSearch = false
     keyword = next
     restartResults()
   }
@@ -525,6 +535,9 @@ enum InstalledSources {
   @State private var article: [SiteArticleBlock] = []
   @State private var selectedBlock: Int?
   @State private var relatedWork: SiteWork?
+  @State private var detailSearch: DetailSearchTag?
+  @State private var searchPresented = false
+  @State private var domainSearch = false
   @State private var playingGame = false
   @State private var browsingVoice = false
   @State private var downloadSheet = false
@@ -573,6 +586,11 @@ enum InstalledSources {
     }
   }
 
+  private func searchDetail(_ tag: DetailSearchTag) {
+    detailSearch = tag
+    searchPresented = true
+  }
+
   private var details: some View {
     VStack(alignment: .leading) {
       Button(tr("返回"), action: close).padding(.horizontal)
@@ -588,6 +606,30 @@ enum InstalledSources {
               Button(tr("重试")) { imageAttempt += 1 }
             }
             if let description = detail.description { Text(description) }
+            if !detail.variants.isEmpty || detail.workCode?.isEmpty == false {
+              Text(tr("其他版本")).font(.headline)
+              ForEach(detail.variants) { variant in
+                Button(variant.editions?.isEmpty == false ? variant.editions!.joined(separator: " · ") : variant.title) {
+                  relatedWork = variant
+                }
+              }
+              if let code = detail.workCode, !code.isEmpty {
+                if site.search == true {
+                  Button(tr("站内查找版本")) { searchDetail(DetailSearchTag(name: code)) }
+                }
+                if site.category != nil {
+                  Button(tr("跨站查找版本")) { domainSearch = true }
+                }
+              }
+            }
+            if !detail.searchTags.isEmpty {
+              DisclosureGroup(tr("标签")) {
+                ForEach(Array(detail.searchTags.enumerated()), id: \.offset) { _, tag in
+                  if site.search == true { Button(tag.name) { searchDetail(tag) } }
+                  else { Text(tag.name) }
+                }
+              }
+            }
             if !article.isEmpty {
               ArticleBody(session: session, library: library, site: site.key, title: detail.title,
                 blocks: article, tr: tr, select: { selectedBlock = $0 })
@@ -685,6 +727,14 @@ enum InstalledSources {
       } else {
         ProgressView()
       }
+    }.sheet(isPresented: $searchPresented) {
+      if let detailSearch {
+        AnyView(SourceResults(session: session, library: library, site: site, locale: locale, incognito: incognito,
+          tr: tr, startingTag: detailSearch, close: { searchPresented = false }))
+      }
+    }.sheet(isPresented: $domainSearch) {
+      AnyView(AggregateSearchPage(session: session, locale: locale, incognito: incognito, tr: tr,
+        back: { domainSearch = false }, initialKeyword: detail?.workCode ?? "", category: site.category))
     }.sheet(item: $relatedWork) { selected in
       AnyView(SiteDetails(session: session, library: library, site: site, workId: selected.id, preview: selected,
         locale: locale, incognito: incognito, tr: tr, close: { relatedWork = nil }).id(selected.id))
@@ -769,7 +819,7 @@ enum InstalledSources {
                 } else if let text = part.text, !text.isEmpty { Text(text) }
                 else if part.type == "link", let address = part.url { Text(address) }
               }
-              if row.repliesAvailable == true {
+              if row.repliesAvailable == true || row.replies?.isEmpty == false {
                 Button(tr("查看回复")) { selectedReply = row }
                   .accessibilityHint(row.author?.name ?? "")
               }

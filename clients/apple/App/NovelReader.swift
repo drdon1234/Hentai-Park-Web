@@ -126,6 +126,7 @@ private enum NovelFailure {
   @State private var updated: Int64 = 0
   @State private var mode: NovelTextMode = .original
   @State private var fontSize = 22.0
+  @State private var viewport: CGSize = .zero
   @ScaledMetric(relativeTo: .body) private var fontScale: CGFloat = 1
   @State private var notes = false
   @State private var error: NovelFailure?
@@ -171,12 +172,12 @@ private enum NovelFailure {
         }
       }
       if let view {
-        GeometryReader { geometry in
-          let size = CGSize(
-            width: geometry.size.width, height: max(0, geometry.size.height - footerHeight))
-          let font = CGFloat(fontSize) * fontScale
-          let page = NovelPage(text: text, cursor: Int(cursor), box: size, fontSize: font)
-          VStack(spacing: 0) {
+        let font = CGFloat(fontSize) * fontScale
+        let page = NovelPage(text: text, cursor: Int(cursor), box: viewport, fontSize: font)
+        let canAdvance = viewport.width > 0 && viewport.height > 0 && pending == nil
+          && page.next > Int(cursor) && page.next < text.length
+        VStack(spacing: 0) {
+          GeometryReader { geometry in
             Canvas { context, bounds in
               context.withCGContext { cg in
                 cg.translateBy(x: 0, y: bounds.height)
@@ -196,34 +197,31 @@ private enum NovelFailure {
                   CTLineDraw(line, cg)
                 }
               }
-            }.frame(height: size.height).accessibilityElement(children: .ignore).accessibilityLabel(
+            }.accessibilityElement(children: .ignore).accessibilityLabel(
               Text(page.content)
             )
             .accessibilityAction(named: Text(tr("下一页"))) {
-              if page.next < text.length {
+              if canAdvance {
                 jump(view.source(offset: Int32(page.next)), display: Int32(page.next))
               }
             }
-            HStack {
-              Button(tr("上一页")) {
-                let previous = NovelPage(
-                  text: text, cursor: Int(cursor), box: size, fontSize: font, backwards: true)
-                jump(view.source(offset: Int32(previous.next)), display: Int32(previous.next))
-              }.disabled(cursor <= 0 || pending != nil)
-              Spacer()
-              Button(tr("下一页")) {
-                jump(view.source(offset: Int32(page.next)), display: Int32(page.next))
-              }
-              .disabled(page.next >= text.length || pending != nil || footerHeight == 0)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .background(
-              GeometryReader { bar in
-                Color.clear.preference(key: NovelFooterHeight.self, value: bar.size.height)
-              })
+            .onAppear { viewport = geometry.size }
+            .onChange(of: geometry.size) { viewport = $0 }
           }
+          HStack {
+            Button(tr("上一页")) {
+              let previous = NovelPage(
+                text: text, cursor: Int(cursor), box: viewport, fontSize: font, backwards: true)
+              jump(view.source(offset: Int32(previous.next)), display: Int32(previous.next))
+            }.disabled(cursor <= 0 || pending != nil || viewport == .zero)
+            Spacer()
+            Button(tr("下一页")) {
+              jump(view.source(offset: Int32(page.next)), display: Int32(page.next))
+            }
+            .disabled(!canAdvance)
+          }
+          .fixedSize(horizontal: false, vertical: true)
         }
-        .onPreferenceChange(NovelFooterHeight.self) { footerHeight = $0 }
       } else if error == nil {
         ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
       }
@@ -270,8 +268,6 @@ private enum NovelFailure {
       }.padding()
     }
   }
-
-  @State private var footerHeight: CGFloat = 0
 
   private func speak() {
     let end = min(Int(cursor) + 3500, text.length)
@@ -377,9 +373,4 @@ private enum NovelFailure {
       } catch { if !Task.isCancelled { self.error = .page(position, display) } }
     }
   }
-}
-
-private struct NovelFooterHeight: PreferenceKey {
-  static var defaultValue: CGFloat { 0 }
-  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

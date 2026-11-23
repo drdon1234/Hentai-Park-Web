@@ -1003,6 +1003,20 @@ let appleCategoryOptions: [AppleCategoryOption] = [
     }
 }
 
+private struct AppleSettingsForm<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        #if os(macOS)
+        ScrollView {
+            Form(content: content).frame(maxWidth: .infinity, alignment: .leading).padding()
+        }
+        #else
+        Form(content: content)
+        #endif
+    }
+}
+
 @MainActor private struct AppleSettingsPanel: View {
     @ObservedObject var access: LibraryAccess
     let session: ProgressSession?
@@ -1021,7 +1035,7 @@ let appleCategoryOptions: [AppleCategoryOption] = [
     }
 
     var body: some View {
-        Form {
+        AppleSettingsForm {
             HStack {
                 Button(access.tr("返回"), action: back)
                 Text(access.tr("应用设置")).font(.headline)
@@ -1134,8 +1148,15 @@ let appleCategoryOptions: [AppleCategoryOption] = [
     @State private var appLock = false
     @State private var categories = Set(appleCategoryOptions.map { $0.id })
 
+    private var finish: some View {
+        Button(access.tr("完成设置")) {
+            let selected: Set<String> = categories.count == appleCategoryOptions.count ? [] : categories
+            Task { await access.finishOnboarding(categories: selected, secureScreen: secureScreen, appLock: appLock, blurCovers: blurCovers) }
+        }.disabled(access.busy || categories.isEmpty)
+    }
+
     var body: some View {
-        Form {
+        AppleSettingsForm {
             Text(access.tr("首次使用设置")).font(.title2)
             Text(access.tr("选择首页内容范围，并设置隐私保护选项。之后仍可在我的页面调整。"))
                 .foregroundColor(.secondary)
@@ -1156,11 +1177,18 @@ let appleCategoryOptions: [AppleCategoryOption] = [
                 }
             }
             if access.failed { Text(access.tr("保存失败，请重试")) }
-            Button(access.tr("完成设置")) {
-                let selected: Set<String> = categories.count == appleCategoryOptions.count ? [] : categories
-                Task { await access.finishOnboarding(categories: selected, secureScreen: secureScreen, appLock: appLock, blurCovers: blurCovers) }
-            }.disabled(access.busy || categories.isEmpty)
+            #if !os(macOS)
+            finish
+            #endif
         }
+        #if os(macOS)
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 0) {
+                Divider()
+                HStack { Spacer(); finish.keyboardShortcut(.defaultAction) }.padding()
+            }.background(.regularMaterial)
+        }
+        #endif
         .disabled(access.busy)
         .onAppear {
             secureScreen = access.privacy?.secureScreen == true

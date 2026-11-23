@@ -164,15 +164,9 @@ public actor ProgressSession {
         try await preferences(ShelfPreferences.self)
     }
 
-    public func saveShelfOptions(sort: String, ascending: Bool, unread: Bool, downloaded: Bool) async throws {
-        guard ["added", "title", "read", "updated"].contains(sort) else { throw CocoaError(.coderInvalidValue) }
-        let encoded = String(decoding: try JSONEncoder().encode(sort), as: UTF8.self)
-        try await run { store, _ in
-            try store.savePreference(name: "librarySort", json: encoded)
-            try store.savePreference(name: "librarySortAsc", json: String(ascending))
-            try store.savePreference(name: "libraryFilterUnread", json: String(unread))
-            try store.savePreference(name: "libraryFilterDownloaded", json: String(downloaded))
-        }
+    public func saveShelfOptions(_ options: ShelfPreferences) async throws {
+        let encoded = String(decoding: try JSONEncoder().encode(options), as: UTF8.self)
+        try await run { store, _ in try store.saveShelfPreferences(json: encoded) }
     }
 
     public func favoriteStats() async throws -> [String: FavoriteCardInfo] {
@@ -260,10 +254,30 @@ public actor ProgressSession {
 
 public struct FavoriteCardInfo: Decodable, Sendable {
     public let added, updated, unread: Int64
-    public let downloaded: Bool
+    public let downloaded, oneShot: Bool
+    public let cover: String?
 }
 
-public struct ShelfPreferences: Decodable, Sendable {
-    public let librarySort: String?
-    public let librarySortAsc, libraryFilterUnread, libraryFilterDownloaded: Bool?
+public struct ShelfPreferences: Codable, Sendable {
+    public var librarySort = "added", libraryFilterKind = "all"
+    public var librarySortAsc = false, libraryFilterUnread = false, libraryFilterDownloaded = false
+    public var libraryFilterSources: [String] = []
+    public var gridColumns = 0
+    public var badgeSource = true, badgeUnread = true, badgeDownloaded = true
+
+    public init() {}
+    public init(from decoder: Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        librarySort = try fields.decodeIfPresent(String.self, forKey: .librarySort) ?? librarySort
+        libraryFilterKind = try fields.decodeIfPresent(String.self, forKey: .libraryFilterKind) ?? libraryFilterKind
+        librarySortAsc = try fields.decodeIfPresent(Bool.self, forKey: .librarySortAsc) ?? librarySortAsc
+        libraryFilterUnread = try fields.decodeIfPresent(Bool.self, forKey: .libraryFilterUnread) ?? libraryFilterUnread
+        libraryFilterDownloaded = try fields.decodeIfPresent(Bool.self, forKey: .libraryFilterDownloaded) ?? libraryFilterDownloaded
+        libraryFilterSources = try fields.decodeIfPresent([String].self, forKey: .libraryFilterSources) ?? []
+        let columns = try fields.decodeIfPresent(Int.self, forKey: .gridColumns) ?? 0
+        gridColumns = [2, 3, 4].contains(columns) ? columns : 0
+        badgeSource = try fields.decodeIfPresent(Bool.self, forKey: .badgeSource) ?? badgeSource
+        badgeUnread = try fields.decodeIfPresent(Bool.self, forKey: .badgeUnread) ?? badgeUnread
+        badgeDownloaded = try fields.decodeIfPresent(Bool.self, forKey: .badgeDownloaded) ?? badgeDownloaded
+    }
 }

@@ -81,12 +81,15 @@ impl ProgressStore {
         let mut query = db.prepare("SELECT w.source||':'||w.id,COALESCE(w.favorited_at,0),w.one_shot,
             COALESCE(MAX(c.date_fetch),0),COUNT(CASE WHEN c.read=0 THEN 1 END),
             (SELECT COALESCE(json_extract(d.json,'$.status')=3 OR json_extract(d.json,'$.done')>0,0)
-             FROM download_tasks d WHERE d.uid=w.source||':'||w.id AND json_valid(d.json))
+             FROM download_tasks d WHERE d.uid=w.source||':'||w.id AND json_valid(d.json)),
+            CASE WHEN json_valid(w.json) THEN CASE WHEN json_type(w.json,'$.cover')='text'
+                THEN json_extract(w.json,'$.cover') END END
             FROM works w LEFT JOIN chapters c ON c.source=w.source AND c.work_id=w.id
             WHERE w.favorite=1 GROUP BY w.source,w.id")?;
         let rows = query.query_map([], |r| Ok((r.get::<_,String>(0)?,serde_json::json!({
             "added":r.get::<_,i64>(1)?, "oneShot":r.get::<_,bool>(2)?,"updated":r.get::<_,i64>(3)?,
-            "unread":r.get::<_,i64>(4)?,"downloaded":r.get::<_,Option<bool>>(5)?.unwrap_or(false)
+            "unread":r.get::<_,i64>(4)?,"downloaded":r.get::<_,Option<bool>>(5)?.unwrap_or(false),
+            "cover":r.get::<_,Option<String>>(6)?
         }))))?.collect::<rusqlite::Result<serde_json::Map<_,_>>>()?;
         Ok(serde_json::Value::Object(rows).to_string())
     }

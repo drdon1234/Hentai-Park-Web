@@ -117,10 +117,7 @@ private extension View {
 @MainActor final class ShelfOptions: ObservableObject {
     @Published var term = ""
     @Published var category = ""
-    @Published var unread = false
-    @Published var downloaded = false
-    @Published var sort = "added"
-    @Published var ascending = false
+    @Published var display = ShelfPreferences()
     @Published var stats: [String: FavoriteCardInfo] = [:]
     @Published var categories: [LibraryCategory] = []
     @Published var selected = Set<LibraryWorkID>()
@@ -135,16 +132,15 @@ private extension View {
             try Task.checkCancellation()
             stats = info
             categories = groups
-            sort = prefs.librarySort ?? "added"
-            ascending = prefs.librarySortAsc ?? false
-            unread = prefs.libraryFilterUnread ?? false
-            downloaded = prefs.libraryFilterDownloaded ?? false
+            display = prefs
             if !groups.contains(where: { $0.name == category }) { category = "" }
             failed = false
         } catch { if !Task.isCancelled { failed = true } }
     }
 
     func rows(_ works: [LibraryWork]) -> [LibraryWork] {
+        let sort = display.librarySort, ascending = display.librarySortAsc
+        let sources = Set(display.libraryFilterSources)
         func info(_ work: LibraryWork) -> FavoriteCardInfo? { stats[work.source + ":" + work.workId] }
         func rank(_ work: LibraryWork) -> Int64 {
             switch sort {
@@ -156,7 +152,10 @@ private extension View {
         return works.filter { work in
             work.favorite && (term.isEmpty || work.title.localizedCaseInsensitiveContains(term)) &&
                 (category.isEmpty || work.categoryNames.contains(category)) &&
-                (!unread || (info(work)?.unread ?? 0) > 0) && (!downloaded || info(work)?.downloaded == true)
+                (display.libraryFilterKind == "all" || work.media == display.libraryFilterKind) &&
+                (sources.isEmpty || sources.contains(work.source)) &&
+                (!display.libraryFilterUnread || (info(work)?.unread ?? 0) > 0) &&
+                (!display.libraryFilterDownloaded || info(work)?.downloaded == true)
         }.sorted { a, b in
             let titles = a.title.localizedStandardCompare(b.title)
             if sort == "title", titles != .orderedSame { return ascending ? titles == .orderedAscending : titles == .orderedDescending }
@@ -172,6 +171,88 @@ private extension View {
     }
 }
 
+@MainActor struct ShelfWorkGrid: View {
+    @ObservedObject var options: ShelfOptions
+    let works: [LibraryWork]
+    let session: ProgressSession
+    let tr: (String) -> String
+    let details: (LibraryWork) -> Void
+    let open: (LibraryWork, String) -> Void
+    @State private var expanded: LibraryWorkID?
+
+    var body: some View {
+        let textOnly = works.allSatisfy { $0.media == "novel" && (options.stats[$0.source + ":" + $0.workId]?.cover ?? "").isEmpty }
+        let count = options.display.gridColumns
+        let columns = textOnly ? [GridItem(.flexible())] : count == 0
+            ? [GridItem(.adaptive(minimum: 128))]
+            : Array(repeating: GridItem(.flexible(minimum: 30), alignment: .topLeading), count: count)
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+            ForEach(works, id: \.libraryID) { work in
+                let info = options.stats[work.source + ":" + work.workId]
+                let selected = options.selected.contains(work.libraryID)
+                VStack(alignment: .leading, spacing: 4) {
+                    Button {
+                        if !options.selecting { details(work) }
+                        else if selected { options.selected.remove(work.libraryID) }
+                        else { options.selected.insert(work.libraryID) }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let cover = info?.cover, !cover.isEmpty {
+                                ShelfCover(session: session, source: work.source, address: cover)
+                            }
+                            if options.selecting {
+                                Label(work.title, systemImage: selected ? "checkmark.circle.fill" : "circle")
+                            } else { Text(work.title) }
+                        }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    }.buttonStyle(.borderless).accessibilityLabel(Text(work.title))
+                        .accessibilityAddTraits(selected ? [.isSelected] : [])
+                    if options.display.badgeSource { Text(work.source).font(.caption) }
+                    if options.display.badgeUnread, let info, !info.oneShot, info.unread > 0 {
+                        Text(tr("未读") + " " + String(info.unread)).font(.caption)
+                    }
+                    if options.display.badgeDownloaded, info?.downloaded == true { Text(tr("已下载")).font(.caption) }
+                    if !options.selecting, work.downloaded, !work.invalidDownload, !work.chapters.isEmpty {
+                        Button(tr(expanded == work.libraryID ? "收起" : "下载的章节")) {
+                            expanded = expanded == work.libraryID ? nil : work.libraryID
+                        }.buttonStyle(.borderless)
+                        if expanded == work.libraryID {
+                            ForEach(work.chapters, id: \.id) { chapter in
+                                Button(chapter.title) { open(work, chapter.id) }.buttonStyle(.borderless)
+                            }
+                        }
+                    }
+                }.accessibilityElement(children: .contain)
+            }
+        }
+    }
+}
+
+@MainActor private struct ShelfCover: View {
+    let session: ProgressSession
+    let source: String
+    let address: String
+    @Environment(\.blurCovers) private var blurCovers
+    @State private var pixels: CGImage?
+
+    var body: some View {
+        Group {
+            if let pixels {
+                Image(decorative: pixels, scale: 1).resizable().scaledToFit().blur(radius: blurCovers ? 14 : 0)
+            } else { Image(systemName: "book.closed").foregroundColor(.secondary) }
+        }.frame(maxWidth: .infinity, maxHeight: 150).accessibilityHidden(true)
+            .task(id: address) {
+                pixels = nil
+                guard let library = InstalledSources.library else { return }
+                do {
+                    let asset = try await session.siteImage(library, site: source, address: address)
+                    let image = try await decodedPage(asset, maxSize: 360)
+                    try Task.checkCancellation()
+                    pixels = image
+                } catch { }
+            }
+    }
+}
+
 @MainActor struct ShelfControls: View {
     private enum Panel: String, Identifiable {
         case filters, categories, migration
@@ -180,10 +261,13 @@ private extension View {
     @ObservedObject var options: ShelfOptions
     let session: ProgressSession
     let visible: [LibraryWork]
+    let sources: [String]
     let incognito: Bool
     let tr: (String) -> String
     let refresh: () -> Void
     @State private var panel: Panel?
+    @State private var draft = ShelfPreferences()
+    @State private var searchDraft = "", categoryDraft = ""
     @State private var removing = false
     @State private var working = false
     @State private var failed = false
@@ -204,7 +288,10 @@ private extension View {
                 action("标为已读") { apply(.markRead) }.disabled(targets.isEmpty)
                 action("取消收藏") { removing = true }.disabled(targets.isEmpty)
             } else {
-                action("筛选与排序") { panel = .filters }
+                action("筛选与排序") {
+                    draft = options.display; searchDraft = options.term; categoryDraft = options.category
+                    failed = false; panel = .filters
+                }
                 action("批量选择") { options.selecting = true }
             }
             if failed { Text(tr("保存失败，请重试")).foregroundColor(.secondary) }
@@ -244,30 +331,53 @@ private extension View {
     private var filterPanel: some View {
         VStack {
             Form {
-                TextField(tr("搜索"), text: $options.term)
-                Picker(tr("分类"), selection: $options.category) {
+                TextField(tr("搜索"), text: $searchDraft)
+                Picker(tr("分类"), selection: $categoryDraft) {
                     Text(tr("全部分类")).tag("")
                     ForEach(options.categories, id: \.id) { Text($0.name).tag($0.name) }
                 }
-                Toggle(tr("有未读"), isOn: $options.unread)
-                Toggle(tr("已下载"), isOn: $options.downloaded)
-                Picker(tr("排序"), selection: $options.sort) {
+                Picker(tr("媒体类型"), selection: $draft.libraryFilterKind) {
+                    ForEach(["all","comic","novel","video","voice","game","article"], id: \.self) { key in
+                        Text(tr(["all":"全部","comic":"漫画","novel":"小说","video":"视频","voice":"音声","game":"游戏","article":"文章"][key] ?? key)).tag(key)
+                    }
+                }
+                Section(header: Text(tr("站点"))) {
+                    ForEach(Array(Set(sources + draft.libraryFilterSources)).sorted(), id: \.self) { source in
+                        Toggle(source, isOn: Binding(get: { draft.libraryFilterSources.contains(source) }, set: { selected in
+                            draft.libraryFilterSources.removeAll { $0 == source }
+                            if selected { draft.libraryFilterSources.append(source) }
+                        }))
+                    }
+                }
+                Toggle(tr("有未读"), isOn: $draft.libraryFilterUnread)
+                Toggle(tr("已下载"), isOn: $draft.libraryFilterDownloaded)
+                Picker(tr("排序"), selection: $draft.librarySort) {
                     ForEach(["added","title","read","updated"], id: \.self) { key in
                         Text(tr(["added":"添加时间","title":"标题","read":"最近阅读","updated":"最近更新"][key] ?? "")).tag(key)
                     }
                 }
-                Toggle(tr("升序"), isOn: $options.ascending)
+                Toggle(tr("升序"), isOn: $draft.librarySortAsc)
+                Picker(tr("每行封面数"), selection: $draft.gridColumns) {
+                    Text(tr("自动")).tag(0)
+                    ForEach([2,3,4], id: \.self) { Text(String($0)).tag($0) }
+                }
+                Toggle(tr("站点图标"), isOn: $draft.badgeSource)
+                Toggle(tr("未读数徽标"), isOn: $draft.badgeUnread)
+                Toggle(tr("已下载徽标"), isOn: $draft.badgeDownloaded)
             }
             if failed { Text(tr("保存失败，请重试")) }
-            Button(tr("完成")) {
-                working = true
-                Task {
-                    defer { working = false }
-                    do {
-                        try await session.saveShelfOptions(sort: options.sort, ascending: options.ascending,
-                            unread: options.unread, downloaded: options.downloaded)
-                        failed = false; panel = nil
-                    } catch { failed = true }
+            HStack {
+                Button(tr("取消")) { panel = nil }
+                Button(tr("完成")) {
+                    working = true
+                    Task {
+                        defer { working = false }
+                        do {
+                            try await session.saveShelfOptions(draft)
+                            options.display = draft; options.term = searchDraft; options.category = categoryDraft
+                            failed = false; panel = nil
+                        } catch { failed = true }
+                    }
                 }
             }
         }.padding().shelfSheetSize().disabled(working).interactiveDismissDisabled()

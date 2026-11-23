@@ -580,78 +580,73 @@ private final class LibraryModel: ObservableObject {
                     Button(access.tr("订阅更新")) { destination = .subscriptions }
                     if let session = model.session {
                         ShelfControls(options: shelf, session: session, visible: filtered,
+                            sources: Array(Set(rows.filter(\.favorite).map(\.source))).sorted(),
                             incognito: access.privacy?.incognito == true, tr: access.tr) { retry += 1 }
                     }
                 }
                 Section(header: Text(access.tr(index == 0 ? "继续看" : labels[index]))) {
                     if filtered.isEmpty { Text(access.tr(["没有继续阅读的作品","还没有收藏","没有下载任务"][index])) }
-                    ForEach(filtered, id: \.libraryID) { work in
-                        VStack(alignment: .leading, spacing: 8) {
-                            if index == 2, downloadSelection.selecting {
-                                let selected = downloadSelection.selected.contains(work.libraryID)
-                                Button {
-                                    if selected { downloadSelection.selected.remove(work.libraryID) }
-                                    else { downloadSelection.selected.insert(work.libraryID) }
-                                } label: {
-                                    Label(work.title, systemImage: selected ? "checkmark.circle.fill" : "circle")
-                                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                                }
-                                .accessibilityLabel(Text(work.title))
-                                .accessibilityAddTraits(selected ? [.isSelected] : [])
-                            } else if index == 1, shelf.selecting {
-                                let selected = shelf.selected.contains(work.libraryID)
-                                Button {
-                                    if selected { shelf.selected.remove(work.libraryID) }
-                                    else { shelf.selected.insert(work.libraryID) }
-                                } label: {
-                                    Label(work.title, systemImage: selected ? "checkmark.circle.fill" : "circle")
-                                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                                }
-                                .accessibilityLabel(Text(work.title))
-                                .accessibilityAddTraits(selected ? [.isSelected] : [])
-                            } else if index == 0, let chapter = work.historyChapter,
-                               ["comic","novel","video","voice","bundle"].contains(work.media), work.contentDomain != "live" {
-                                Button(work.title) { open(work, chapter) }
-                            } else if work.downloaded, !work.invalidDownload, !work.chapters.isEmpty,
-                                      ["comic","video","novel","bundle"].contains(work.media) {
-                                let expanded = expandedDownloads.contains(work.libraryID)
-                                Button {
-                                    if expanded { expandedDownloads.remove(work.libraryID) }
-                                    else { expandedDownloads.insert(work.libraryID) }
-                                } label: {
+                    if index == 1, let session = model.session {
+                        ShelfWorkGrid(options: shelf, works: filtered, session: session, tr: access.tr,
+                            details: { destination = .work($0) }, open: open)
+                    } else {
+                        ForEach(filtered, id: \.libraryID) { work in
+                            VStack(alignment: .leading, spacing: 8) {
+                                if index == 2, downloadSelection.selecting {
+                                    let selected = downloadSelection.selected.contains(work.libraryID)
+                                    Button {
+                                        if selected { downloadSelection.selected.remove(work.libraryID) }
+                                        else { downloadSelection.selected.insert(work.libraryID) }
+                                    } label: {
+                                        Label(work.title, systemImage: selected ? "checkmark.circle.fill" : "circle")
+                                            .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                                    }
+                                    .accessibilityLabel(Text(work.title))
+                                    .accessibilityAddTraits(selected ? [.isSelected] : [])
+                                } else if index == 0, let chapter = work.historyChapter,
+                                   ["comic","novel","video","voice","bundle"].contains(work.media), work.contentDomain != "live" {
+                                    Button(work.title) { open(work, chapter) }
+                                } else if work.downloaded, !work.invalidDownload, !work.chapters.isEmpty,
+                                          ["comic","video","novel","bundle"].contains(work.media) {
+                                    let expanded = expandedDownloads.contains(work.libraryID)
+                                    Button {
+                                        if expanded { expandedDownloads.remove(work.libraryID) }
+                                        else { expandedDownloads.insert(work.libraryID) }
+                                    } label: {
+                                        HStack {
+                                            Text(work.title)
+                                            Spacer()
+                                            Image(systemName: expanded ? "chevron.down" : "chevron.forward")
+                                                .accessibilityHidden(true)
+                                        }.contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(Text(work.title))
+                                    .accessibilityHint(Text(access.tr(expanded ? "收起" : "展开")))
+                                    if expanded {
+                                        ForEach(work.chapters, id: \.id) { chapter in
+                                            Button(chapter.title) { open(work, chapter.id) }
+                                                .buttonStyle(.borderless)
+                                        }
+                                    }
+                                } else if index != 2 {
+                                    Button(work.title) { destination = .work(work) }
+                                } else { Text(work.title) }
+
+                                if index == 2, !downloadSelection.selecting, let state = work.downloadStatus, state != 3,
+                                   !work.invalidDownload, work.pendingDeletion == nil, let session = model.session {
+                                    let resume = state == 2 || state == 4
                                     HStack {
-                                        Text(work.title)
+                                        Text(access.tr(state == 4 ? "下载失败" : state == 2 ? "已暂停" : state == 1 ? "下载中" : "等待下载"))
+                                            .foregroundColor(.secondary)
                                         Spacer()
-                                        Image(systemName: expanded ? "chevron.down" : "chevron.forward")
-                                            .accessibilityHidden(true)
-                                    }.contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(Text(work.title))
-                                .accessibilityHint(Text(access.tr(expanded ? "收起" : "展开")))
-                                if expanded {
-                                    ForEach(work.chapters, id: \.id) { chapter in
-                                        Button(chapter.title) { open(work, chapter.id) }
-                                            .buttonStyle(.borderless)
+                                        Button(access.tr(resume ? (state == 4 ? "重试" : "继续") : "暂停")) {
+                                            Task { await downloads.toggle(work, resume: resume, fallback: session) }
+                                        }.buttonStyle(.borderless)
                                     }
                                 }
-                            } else if index != 2 {
-                                Button(work.title) { destination = .work(work) }
-                            } else { Text(work.title) }
-
-                            if index == 2, !downloadSelection.selecting, let state = work.downloadStatus, state != 3,
-                               !work.invalidDownload, work.pendingDeletion == nil, let session = model.session {
-                                let resume = state == 2 || state == 4
-                                HStack {
-                                    Text(access.tr(state == 4 ? "下载失败" : state == 2 ? "已暂停" : state == 1 ? "下载中" : "等待下载"))
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                    Button(access.tr(resume ? (state == 4 ? "重试" : "继续") : "暂停")) {
-                                        Task { await downloads.toggle(work, resume: resume, fallback: session) }
-                                    }.buttonStyle(.borderless)
-                                }
-                            }
-                        }.accessibilityElement(children: .contain)
+                            }.accessibilityElement(children: .contain)
+                        }
                     }
                 }
                 if index == 0, let session = model.session, let library = InstalledSources.library {

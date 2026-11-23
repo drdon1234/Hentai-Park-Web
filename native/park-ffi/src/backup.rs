@@ -153,6 +153,22 @@ impl ProgressStore {
         Ok(())
     }
 
+    pub fn save_shelf_preferences(&self, json: String) -> Result<(), StorageError> {
+        let values: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&json).map_err(|_| StorageError::InvalidBackup)?;
+        if !values.iter().all(|(name, value)| {
+            matches!(name.as_str(), "librarySort" | "librarySortAsc" | "libraryFilterUnread"
+                | "libraryFilterDownloaded" | "libraryFilterKind" | "libraryFilterSources"
+                | "gridColumns" | "badgeSource" | "badgeUnread" | "badgeDownloaded")
+                && park_domain::settings::valid(name, value)
+        }) {
+            return Err(StorageError::InvalidBackup);
+        }
+        let _gate = park_storage::recovery::gate(&self.root, true)?;
+        backup::set_preferences(&self.root, values)?;
+        Ok(())
+    }
+
     pub fn save_discovery_scope(&self, dimension: String, media: String) -> Result<(), StorageError> {
         let values = [("homeDimension".to_owned(), dimension.into()), ("homeMedia".to_owned(), media.into())];
         if !values.iter().all(|(name, value)| park_domain::settings::valid(name, value)) {

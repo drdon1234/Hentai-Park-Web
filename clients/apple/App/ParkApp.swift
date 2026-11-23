@@ -561,7 +561,8 @@ private final class LibraryModel: ObservableObject {
                     Button(access.tr("书库更新")) { destination = .updates }
                     Button(access.tr("订阅更新")) { destination = .subscriptions }
                     if let session = model.session {
-                        ShelfControls(options: shelf, session: session, visible: filtered, tr: access.tr) { retry += 1 }
+                        ShelfControls(options: shelf, session: session, visible: filtered,
+                            incognito: access.privacy?.incognito == true, tr: access.tr) { retry += 1 }
                     }
                 }
                 Section(header: Text(access.tr(index == 0 ? "继续看" : labels[index]))) {

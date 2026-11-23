@@ -147,7 +147,7 @@ impl SourceService {
             call.check()?;
             match self.catalog.manifest(&entry.key, call) {
                 Ok(manifest) => result.push(json!({
-                    "key":entry.key, "name":manifest["name"], "category":manifest["category"],
+                    "key":entry.key, "name":manifest["name"], "category":manifest["category"], "type":manifest["type"],
                     "feed":manifest["feeds"].as_array().is_some_and(|rows| !rows.is_empty()),
                     "entryFeed":manifest["feeds"].as_array().and_then(|feeds|
                         feeds.iter().find(|feed| feed["key"] == manifest["defaultFeed"]).or_else(|| feeds.first())),

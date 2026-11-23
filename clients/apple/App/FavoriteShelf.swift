@@ -1,6 +1,109 @@
 import ParkCore
 import SwiftUI
 
+@MainActor private struct ShelfMigration: View {
+    let work: LibraryWork
+    let session: ProgressSession
+    let incognito: Bool
+    let tr: (String) -> String
+    let cancel: () -> Void
+    let completed: (String) -> Void
+    @StateObject private var prompt = SitePrompt()
+    @State private var sites: [InstalledSite]?
+    @State private var site: InstalledSite?
+    @State private var results: [SiteWork]?
+    @State private var choice: SiteWork?
+    @State private var term = ""
+    @State private var categories = true
+    @State private var progress = true
+    @State private var busy = false
+    @State private var failed = false
+    @State private var request = 0
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(tr("迁移到其他站点")).font(.headline)
+            Text(work.title)
+            if let site, let choice {
+                Text(site.name ?? site.key)
+                Text(choice.title)
+                Toggle(tr("复制分类"), isOn: $categories)
+                if work.media != "game" {
+                    Toggle(tr("复制已读章节"), isOn: $progress).disabled(incognito)
+                }
+                HStack {
+                    Button(tr("复制")) { apply(site, choice, remove: false) }
+                    Button(tr("迁移")) { apply(site, choice, remove: true) }
+                }
+                Button(tr("返回")) { self.choice = nil; failed = false }
+            } else if let site {
+                Text(site.name ?? site.key)
+                TextField(tr("搜索"), text: $term)
+                Button(tr("搜索")) { request += 1 }.disabled(term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if let results {
+                    if results.isEmpty { Text(tr("没有找到")) }
+                    List(results) { row in Button(row.title) { choice = row; failed = false } }
+                }
+                Button(tr("返回")) { self.site = nil; results = nil; failed = false }
+            } else if let sites {
+                if sites.isEmpty { Text(tr("没有找到")) }
+                List(sites) { target in Button(target.name ?? target.key) {
+                    site = target; term = work.title; request += 1
+                } }
+            }
+            if busy { ProgressView() }
+            if failed {
+                Text(tr("加载失败"))
+                if choice == nil { Button(tr("重试")) { request += 1 } }
+            }
+            Button(tr("取消"), action: cancel)
+        }
+        .padding().disabled(busy).interactiveDismissDisabled(busy)
+        .siteConfirmation(prompt, tr: tr)
+        .task(id: request) {
+            busy = true; failed = false
+            defer { if !Task.isCancelled { busy = false } }
+            do {
+                guard let library = InstalledSources.library else { throw SiteReadError.malformed }
+                if let site {
+                    results = nil
+                    let page = try await prompt.perform { confirmation in
+                        try await session.sitePage(library, site: site, keyword: term.trimmingCharacters(in: .whitespacesAndNewlines),
+                            page: 1, cursor: nil, confirmation: confirmation)
+                    }
+                    try Task.checkCancellation()
+                    results = page.items
+                } else {
+                    sites = try await session.sites(library).filter {
+                        $0.key != work.source && $0.mediaType == work.media && $0.search == true && $0.detail
+                    }
+                }
+            } catch { if !Task.isCancelled { failed = true } }
+        }.onAppear { progress = !incognito && work.media != "game" }
+    }
+
+    private func apply(_ site: InstalledSite, _ choice: SiteWork, remove: Bool) {
+        guard !busy, let library = InstalledSources.library else { return }
+        busy = true; failed = false
+        Task {
+            defer { busy = false }
+            do {
+                let detail = try await prompt.perform { confirmation in
+                    try await session.siteDetail(library, site: site.key, id: choice.id,
+                        preview: choice, confirmation: confirmation)
+                }
+                let removed = try await session.migrateFavorite(from: work, to: site, item: detail,
+                    categories: categories, progress: progress && !incognito && work.media != "game", remove: remove)
+                if removed {
+                    completed(tr("已迁移到 {value0}").replacingOccurrences(of: "{value0}", with: site.name ?? site.key))
+                } else {
+                    completed(tr(remove ? "已复制到新的站点；未匹配的进度保留在原收藏中" : "已复制到新的站点"))
+                }
+            } catch { failed = true }
+        }
+    }
+}
+
 @MainActor final class ShelfOptions: ObservableObject {
     @Published var term = ""
     @Published var category = ""
@@ -63,6 +166,7 @@ import SwiftUI
     @ObservedObject var options: ShelfOptions
     let session: ProgressSession
     let visible: [LibraryWork]
+    let incognito: Bool
     let tr: (String) -> String
     let refresh: () -> Void
     @State private var filters = false
@@ -71,6 +175,8 @@ import SwiftUI
     @State private var working = false
     @State private var failed = false
     @State private var name = ""
+    @State private var migration: [LibraryWork] = []
+    @State private var outcome = ""
 
     private var targets: [LibraryWork] { visible.filter { options.selected.contains($0.libraryID) } }
     var body: some View {
@@ -81,6 +187,7 @@ import SwiftUI
             if options.selecting {
                 Button(tr("取消选择")) { options.finishSelection() }
                 Button(tr("分类")) { name = ""; classifying = true }.disabled(targets.isEmpty)
+                Button(tr("迁移到其他站点")) { migration = targets }.disabled(targets.isEmpty)
                 Button(tr("标为已读")) { apply(.markRead) }.disabled(targets.isEmpty)
                 Button(tr("取消收藏")) { removing = true }.disabled(targets.isEmpty)
             } else {
@@ -88,8 +195,20 @@ import SwiftUI
                 Button(tr("批量选择")) { options.selecting = true }
             }
             if failed { Text(tr("保存失败，请重试")).foregroundColor(.secondary) }
+            if !outcome.isEmpty { Text(outcome) }
         }
         .disabled(working)
+        .sheet(isPresented: Binding(get: { !migration.isEmpty }, set: { if !$0 { migration = [] } })) {
+            if let work = migration.first {
+                ShelfMigration(work: work, session: session, incognito: incognito, tr: tr,
+                    cancel: { migration = [] }, completed: { message in
+                        outcome = message
+                        migration.removeFirst()
+                        if migration.isEmpty { options.finishSelection() }
+                        refresh()
+                    }).id(work.libraryID)
+            }
+        }
         .sheet(isPresented: $filters) {
             VStack {
                 Form {

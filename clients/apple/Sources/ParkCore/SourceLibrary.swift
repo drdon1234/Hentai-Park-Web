@@ -51,6 +51,7 @@ public struct InstalledSite: Identifiable, Sendable {
   public let key: String
   public let name: String?
   public let category: String?
+  public let mediaType: String?
   public let entryFeed: Feed?
   public let search: Bool?
   public let detail: Bool
@@ -69,6 +70,7 @@ public struct InstalledSite: Identifiable, Sendable {
     key = id
     name = site["name"] as? String
     category = site["category"] as? String
+    mediaType = site["type"] as? String
     search = site["search"] as? Bool
     detail = site["detail"] as? Bool == true
     nativeVideo = site["nativeVideo"] as? Bool == true
@@ -158,6 +160,7 @@ public struct SiteWork: Decodable, Identifiable, Sendable {
   private let tagGroups: [SiteWorkTag]?
   public var tags: [String]? { tagGroups?.flatMap(\.values) }
   public let chapters: [Chapter]?
+  public let chaptersComplete: Bool?
   public let singleChapterId: String?
   public let voiceRoot: VoiceNode?
   let voiceMediaForm: String?
@@ -180,7 +183,7 @@ public struct SiteWork: Decodable, Identifiable, Sendable {
     return blocks
   }
   private enum CodingKeys: String, CodingKey {
-    case id, title, subtitle, description, cover, chapters, singleChapterId
+    case id, title, subtitle, description, cover, chapters, chaptersComplete, singleChapterId
     case tagGroups = "tags"
     case voiceRoot, voiceMediaForm, voiceTrackKinds, voiceSubtitles
   }
@@ -312,6 +315,24 @@ extension ProgressSession {
   }
   public func lastReadChapter(source: String, work: String) async throws -> String? {
     try await run { store, _ in try store.lastReadChapter(source: source, work: work) }
+  }
+
+  public func migrateFavorite(from work: LibraryWork, to site: InstalledSite,
+                             item: SiteWork, categories: Bool, progress: Bool, remove: Bool) async throws -> Bool {
+    guard site.key != work.source, site.mediaType == work.media, let domain = site.category,
+          let data = item.summary, !item.title.isEmpty else { throw SiteReadError.malformed }
+    var summary = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+    summary["id"] = item.id
+    summary["title"] = item.title
+    summary["mediaKind"] = work.media
+    summary["contentDomain"] = domain
+    summary["chapters"] = item.chapters?.map { ["id": $0.id, "title": $0.title ?? $0.id] }
+    summary["chaptersComplete"] = item.chaptersComplete
+    let json = String(decoding: try JSONSerialization.data(withJSONObject: summary), as: UTF8.self)
+    return try await run { store, _ in
+      try store.migrateFavorite(fromSource: work.source, fromId: work.workId, toSource: site.key,
+        detailJson: json, categories: categories, progress: progress, remove: remove)
+    }
   }
   public func sites(_ library: SourceLibrary) async throws -> [InstalledSite] {
     try await installedSites(library).filter {

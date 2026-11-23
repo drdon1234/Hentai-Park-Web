@@ -1,6 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde_json::Value;
 pub mod updates;
+pub mod migration;
 
 /// 详情页只持久化书目字段。正文、临时播放地址和插件私有对象不写入书库。
 pub fn save_summary(
@@ -10,6 +11,17 @@ pub fn save_summary(
     favorite: Option<bool>,
     now: i64,
 ) -> rusqlite::Result<bool> {
+    save_classified_summary(db, source, detail, favorite, now, None)
+}
+
+pub fn save_classified_summary(
+    db: &mut Connection,
+    source: &str,
+    detail: &Value,
+    favorite: Option<bool>,
+    now: i64,
+    categories: Option<&[i64]>,
+) -> rusqlite::Result<bool> {
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let id = upsert_summary(&tx, source, detail)?;
     match favorite {
@@ -18,6 +30,15 @@ pub fn save_summary(
         }
         None => {
             tx.execute("INSERT INTO history(source,work_id,time) VALUES(?,?,?) ON CONFLICT(source,work_id) DO UPDATE SET time=MAX(time,excluded.time)",params![source,id,now])?;
+        }
+    }
+    if let Some(categories) = categories {
+        tx.execute("DELETE FROM work_categories WHERE source=? AND work_id=?", params![source,id])?;
+        for category in categories {
+            if tx.execute("INSERT INTO work_categories(source,work_id,category_id)
+                SELECT ?,?,id FROM categories WHERE id=?", params![source,id,category])? != 1 {
+                return Err(rusqlite::Error::QueryReturnedNoRows);
+            }
         }
     }
     let current = tx.query_row(

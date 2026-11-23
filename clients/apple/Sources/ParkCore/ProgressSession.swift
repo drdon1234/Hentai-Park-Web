@@ -132,6 +132,40 @@ public actor ProgressSession {
         try await run { store, _ in try store.libraryWorks() }
     }
 
+    public func shelfCategories() async throws -> [LibraryCategory] {
+        try await run { store, _ in try store.libraryCategories(source: nil, work: nil) }
+    }
+
+    public func shelfPreferences() async throws -> ShelfPreferences {
+        try await preferences(ShelfPreferences.self)
+    }
+
+    public func saveShelfOptions(sort: String, ascending: Bool, unread: Bool, downloaded: Bool) async throws {
+        guard ["added", "title", "read", "updated"].contains(sort) else { throw CocoaError(.coderInvalidValue) }
+        let encoded = String(decoding: try JSONEncoder().encode(sort), as: UTF8.self)
+        try await run { store, _ in
+            try store.savePreference(name: "librarySort", json: encoded)
+            try store.savePreference(name: "librarySortAsc", json: String(ascending))
+            try store.savePreference(name: "libraryFilterUnread", json: String(unread))
+            try store.savePreference(name: "libraryFilterDownloaded", json: String(downloaded))
+        }
+    }
+
+    public func favoriteStats() async throws -> [String: FavoriteCardInfo] {
+        try await run { store, _ in
+            try JSONDecoder().decode([String: FavoriteCardInfo].self, from: Data(try store.favoriteCardStats().utf8))
+        }
+    }
+
+    public func editFavorites(_ works: [LibraryWork], action: FavoriteEdit) async throws {
+        let keys = works.map { FavoriteIdentity(source: $0.source, work: $0.workId) }
+        try await run { store, _ in try store.editFavorites(works: keys, action: action) }
+    }
+
+    public func createShelfCategory(_ name: String) async throws {
+        try await run { store, _ in try store.nameCategory(id: nil, name: name) }
+    }
+
     public func chapterImages(_ key: ChapterKey, cache: URL) async throws -> ChapterImages {
         try await run { store, _ in try store.chapterImages(key: key, cacheDirectory: cache.path) }
     }
@@ -198,4 +232,14 @@ public actor ProgressSession {
         for call in calls { call.request.cancel() }
         for call in calls { await call.join() }
     }
+}
+
+public struct FavoriteCardInfo: Decodable, Sendable {
+    public let added, updated, unread: Int64
+    public let downloaded: Bool
+}
+
+public struct ShelfPreferences: Decodable, Sendable {
+    public let librarySort: String?
+    public let librarySortAsc, libraryFilterUnread, libraryFilterDownloaded: Bool?
 }

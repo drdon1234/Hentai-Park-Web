@@ -519,6 +519,28 @@ enum InstalledSources {
   }
 }
 
+#if os(macOS)
+private struct DetailDisclosureStyle: DisclosureGroupStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Button {
+        configuration.isExpanded.toggle()
+      } label: {
+        HStack(spacing: 6) {
+          Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
+            .font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
+          configuration.label
+        }.frame(maxWidth: .infinity, alignment: .leading)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityAddTraits(configuration.isExpanded ? .isSelected : [])
+      if configuration.isExpanded { configuration.content }
+    }
+  }
+}
+#endif
+
 @MainActor struct SiteDetails: View {
   @EnvironmentObject private var recorder: BroadcastRecorder
   @Environment(\.blurCovers) private var blurCovers
@@ -662,6 +684,9 @@ enum InstalledSources {
                   tagRow(tag)
                 }
               }
+              #if os(macOS)
+              .disclosureGroupStyle(DetailDisclosureStyle())
+              #endif
             }
             if !article.isEmpty {
               ArticleBody(session: session, library: library, site: site.key, title: detail.title,
@@ -764,6 +789,9 @@ enum InstalledSources {
                     }
                   }
                 }
+                #if os(macOS)
+                .disclosureGroupStyle(DetailDisclosureStyle())
+                #endif
               }
             }
             if site.comments && detail.allowsComments {

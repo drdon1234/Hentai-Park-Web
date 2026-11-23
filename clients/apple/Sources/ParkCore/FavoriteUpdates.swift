@@ -21,6 +21,7 @@ public enum FavoriteFilter: String, CaseIterable, Sendable {
 }
 
 public struct FavoritePreferences: Decodable, Sendable {
+  public let askCategoryOnFavorite: Bool?
   public let libraryUpdateHours: Int?
   let adultConfirmed: Bool?
   let downloadDirectory: String?

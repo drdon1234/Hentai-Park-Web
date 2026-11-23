@@ -160,6 +160,14 @@ public actor ProgressSession {
         try await run { store, _ in try store.libraryCategories(source: nil, work: nil) }
     }
 
+    public func similarFavorite(source: String, id: String, title: String) async throws -> SimilarFavorite? {
+        try await run { store, _ in try store.similarFavorite(source: source, id: id, title: title) }
+    }
+
+    public func askForFavoriteCategory(_ enabled: Bool) async throws {
+        try await run { store, _ in try store.savePreference(name: "askCategoryOnFavorite", json: String(enabled)) }
+    }
+
     public func shelfPreferences() async throws -> ShelfPreferences {
         try await preferences(ShelfPreferences.self)
     }

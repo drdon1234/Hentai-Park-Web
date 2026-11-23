@@ -596,7 +596,9 @@ enum InstalledSources {
 
 @MainActor struct StoredSiteDetails: View {
   let session: ProgressSession
-  let work: LibraryWork
+  let source: String
+  let workId: String
+  let title: String
   let locale: String
   let incognito: Bool
   let tr: (String) -> String
@@ -609,12 +611,12 @@ enum InstalledSources {
     Group {
       if let site, let library = InstalledSources.library {
         SiteDetails(
-          session: session, library: library, site: site, workId: work.workId, preview: nil,
+          session: session, library: library, site: site, workId: workId, preview: nil,
           locale: locale, incognito: incognito, tr: tr, close: back)
       } else {
         VStack {
           Button(tr("返回"), action: back)
-          Text(work.title).font(.headline)
+          Text(title).font(.headline)
           if failed { Button(tr("站点加载失败，请重试")) { retry += 1 } } else { ProgressView() }
         }
       }
@@ -624,7 +626,7 @@ enum InstalledSources {
       do {
         guard let library = InstalledSources.library,
           let found = try await session.sites(library).first(where: {
-            $0.key == work.source && $0.detail
+            $0.key == source && $0.detail
           })
         else { throw SiteReadError.malformed }
         site = found
@@ -660,10 +662,44 @@ private struct DetailSection<Content: View>: View {
   }
 }
 
+private struct FavoriteFolder: Identifiable, Hashable {
+  let id: Int64
+  let name: String
+}
+
+private struct FavoriteFolderSelection: View {
+  let folders: [FavoriteFolder]
+  let saving: Bool
+  let failed: Bool
+  let tr: (String) -> String
+  let cancel: () -> Void
+  let save: ([Int64]) -> Void
+  @State private var selected = Set<Int64>()
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text(tr("收藏到")).font(.headline)
+      List(folders) { folder in
+        Toggle(folder.name, isOn: Binding(get: { selected.contains(folder.id) }, set: { enabled in
+          if enabled { selected.insert(folder.id) } else { selected.remove(folder.id) }
+        }))
+      }
+      if failed { Text(tr("保存失败，请重试")) }
+      HStack {
+        Button(tr("取消"), action: cancel)
+        Button(tr("确定")) { save(selected.sorted()) }
+      }
+    }.padding().disabled(saving).interactiveDismissDisabled(saving)
+  }
+}
+
 private enum DetailDestination: Hashable, Identifiable {
   case author(String)
   case search(DetailSearchTag)
   case editions(String)
+  case similar(source: String, id: String, title: String)
+  case existing(source: String, id: String, title: String)
+  case category([FavoriteFolder])
   var id: Self { self }
 }
 
@@ -747,6 +783,29 @@ private enum DetailDestination: Hashable, Identifiable {
       }
     } else {
       details
+    }
+  }
+
+  private func changeFavorite(checkSimilar: Bool, categories: [Int64]? = nil) {
+    guard let detail, let work, !saving else { return }
+    saving = true
+    saveFailed = false
+    Task { @MainActor in
+      defer { saving = false }
+      do {
+        if !work.favorite, checkSimilar,
+          let match = try await session.similarFavorite(source: site.key, id: detail.id, title: detail.title) {
+          destination = .similar(source: match.source, id: match.id, title: match.title)
+          return
+        }
+        if !work.favorite, categories == nil, try await session.favoritePreferences().askCategoryOnFavorite == true {
+          let folders = try await session.shelfCategories().map { FavoriteFolder(id: $0.id, name: $0.name) }
+          if !folders.isEmpty { destination = .category(folders); return }
+        }
+        self.work = try await session.openSiteWork(library, site: site, item: detail, incognito: incognito,
+          favorite: !work.favorite, categories: categories)
+        destination = nil
+      } catch { if !Task.isCancelled { saveFailed = true } }
     }
   }
 
@@ -846,16 +905,7 @@ private enum DetailDestination: Hashable, Identifiable {
                 }
               }
               Button(tr(work.favorite ? "取消应用内收藏" : "应用内收藏")) {
-                saving = true
-                saveFailed = false
-                Task {
-                  defer { saving = false }
-                  do {
-                    self.work = try await session.openSiteWork(
-                      library, site: site, item: detail, incognito: incognito,
-                      favorite: !work.favorite)
-                  } catch { if !Task.isCancelled { saveFailed = true } }
-                }
+                changeFavorite(checkSimilar: true)
               }.disabled(saving)
               if saveFailed { Text(tr("保存失败，请重试")) }
                 if !work.chapters.isEmpty && (work.media == "comic" || work.media == "novel" || work.media == "video" && site.nativeVideo) {
@@ -944,6 +994,21 @@ private enum DetailDestination: Hashable, Identifiable {
       }
     }.sheet(item: $destination) { target in
       switch target {
+      case .similar(let source, let id, let title):
+        VStack(alignment: .leading, spacing: 12) {
+          Text(tr("书库中已有相似作品")).font(.headline)
+          Text("「\(title)」（\(source)）")
+          Button(tr("打开已有")) { destination = .existing(source: source, id: id, title: title) }
+          Button(tr("仍然收藏")) { changeFavorite(checkSimilar: false) }
+          Button(tr("取消")) { destination = nil }
+          if saveFailed { Text(tr("保存失败，请重试")) }
+        }.padding().disabled(saving)
+      case .existing(let source, let id, let title):
+        AnyView(StoredSiteDetails(session: session, source: source, workId: id, title: title, locale: locale,
+          incognito: incognito, tr: tr, back: { destination = nil }))
+      case .category(let folders):
+        FavoriteFolderSelection(folders: folders, saving: saving, failed: saveFailed, tr: tr,
+          cancel: { destination = nil }, save: { changeFavorite(checkSimilar: false, categories: $0) })
       case .author(let link):
         AnyView(AuthorDestination(session: session, library: library, site: site, address: link, locale: locale,
           incognito: incognito, tr: tr, close: { destination = nil }))

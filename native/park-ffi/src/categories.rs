@@ -16,6 +16,13 @@ pub struct FavoriteIdentity {
     pub work: String,
 }
 
+#[derive(uniffi::Record)]
+pub struct SimilarFavorite {
+    pub source: String,
+    pub id: String,
+    pub title: String,
+}
+
 #[derive(uniffi::Enum)]
 pub enum FavoriteEdit {
     MarkRead,
@@ -25,6 +32,11 @@ pub enum FavoriteEdit {
 
 #[uniffi::export]
 impl ProgressStore {
+    pub fn similar_favorite(&self, source: String, id: String, title: String) -> Result<Option<SimilarFavorite>, StorageError> {
+        let db = self.lock()?;
+        Ok(park_storage::library::similar_favorite(&db, &source, &id, &title)?
+            .map(|(source, id, title)| SimilarFavorite { source, id, title }))
+    }
     pub fn edit_favorites(&self, works: Vec<FavoriteIdentity>, action: FavoriteEdit) -> Result<(), StorageError> {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| StorageError::IoFailure)?.as_millis();

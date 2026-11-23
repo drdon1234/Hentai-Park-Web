@@ -688,7 +688,7 @@ private final class LibraryModel: ObservableObject {
             SourceResults(session: session, library: library, site: site, locale: access.locale,
                 incognito: access.privacy?.incognito == true, tr: access.tr, close: leaveChapter).id(site.id)
         } else if case .work(let onlineWork)? = destination, let session = model.session {
-            StoredSiteDetails(session:session,work:onlineWork,locale:access.locale,incognito:access.privacy?.incognito==true,tr:access.tr,back:leaveChapter).id(onlineWork)
+            StoredSiteDetails(session:session,source:onlineWork.source,workId:onlineWork.workId,title:onlineWork.title,locale:access.locale,incognito:access.privacy?.incognito==true,tr:access.tr,back:leaveChapter).id(onlineWork)
         } else if case .chapter(let key)? = destination, let session = model.session, let work = model.works?.first(where: {
             $0.source == key.source && $0.workId == key.workId
         }) {

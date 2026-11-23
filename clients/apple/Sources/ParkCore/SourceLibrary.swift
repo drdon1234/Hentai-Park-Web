@@ -414,7 +414,7 @@ extension ProgressSession {
 
   public func openSiteWork(
     _ library: SourceLibrary, site: InstalledSite, item: SiteWork, incognito: Bool,
-    favorite: Bool? = nil
+    favorite: Bool? = nil, categories: [Int64]? = nil
   ) async throws -> LibraryWork {
     let root = directory
     return try await run { store, request in
@@ -454,7 +454,11 @@ extension ProgressSession {
         if summary["contentDomain"] == nil { summary["contentDomain"] = domain }
         let json = String(
           decoding: try JSONSerialization.data(withJSONObject: summary), as: UTF8.self)
-        starred = try store.saveWorkSummary(source: site.key, summary: json, favorite: favorite)
+        if let categories, favorite == true {
+          starred = try store.favoriteWithCategories(source: site.key, summary: json, categories: categories)
+        } else {
+          starred = try store.saveWorkSummary(source: site.key, summary: json, favorite: favorite)
+        }
       }
       return LibraryWork(
         downloaded: false, invalidDownload: false, pendingDeletion: nil, downloadStatus: nil,

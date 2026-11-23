@@ -3,6 +3,41 @@ use serde_json::Value;
 pub mod updates;
 pub mod migration;
 
+fn comparison_title(title: &str) -> String {
+    use regex::Regex;
+    use std::sync::LazyLock;
+    static BRACKETS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"[\[\(【（{「『〔][^\[\(【（{「『〔\]\)】）}」』〕]*[\]\)】）}」』〕]").unwrap()
+    });
+    static SEPARATORS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[\s\p{P}\p{S}]+").unwrap());
+    let mut plain = title.to_owned();
+    for _ in 0..4 {
+        let replaced = BRACKETS.replace_all(&plain, " ");
+        if matches!(replaced, std::borrow::Cow::Borrowed(_)) { break; }
+        plain = replaced.into_owned();
+    }
+    let text = if plain.trim().is_empty() { title } else { &plain };
+    let lower = text.to_lowercase();
+    let key = SEPARATORS.replace_all(&lower, "");
+    if key.is_empty() { title.trim().to_lowercase() } else { key.into_owned() }
+}
+
+pub fn similar_favorite(db: &Connection, source: &str, id: &str, title: &str)
+    -> rusqlite::Result<Option<(String, String, String)>>
+{
+    let key = comparison_title(title);
+    let mut query = db.prepare("SELECT source,id,title FROM works WHERE favorite=1 AND (source<>?1 OR id<>?2)
+        ORDER BY favorited_at DESC,source,id")?;
+    let mut rows = query.query(params![source, id])?;
+    while let Some(row) = rows.next()? {
+        let candidate: String = row.get(2)?;
+        if comparison_title(&candidate) == key {
+            return Ok(Some((row.get(0)?, row.get(1)?, candidate)));
+        }
+    }
+    Ok(None)
+}
+
 /// 详情页只持久化书目字段。正文、临时播放地址和插件私有对象不写入书库。
 pub fn save_summary(
     db: &mut Connection,

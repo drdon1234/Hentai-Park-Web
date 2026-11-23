@@ -41,6 +41,9 @@ import SwiftUI
               }.disabled(operation != nil)
             }
             if showFilters, let prefs {
+              Toggle(tr("收藏时选择分类"), isOn: Binding(get: { prefs.askCategoryOnFavorite == true }, set: { enabled in
+                run { try await session.askForFavoriteCategory(enabled) }
+              }))
               let hours = prefs.libraryUpdateHours ?? 0
               Picker(tr("书库更新"), selection: Binding(get: { hours }, set: { value in
                 run { try await session.setFavoriteInterval(value) }

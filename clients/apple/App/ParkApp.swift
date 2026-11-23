@@ -417,6 +417,7 @@ private final class LibraryModel: ObservableObject {
     @StateObject private var model = LibraryModel()
     @StateObject private var shelf = ShelfOptions()
     @StateObject private var downloadSelection = DownloadSelection()
+    @StateObject private var siteDisplayOrder = SiteDisplayOrder()
     @State private var group = 0
     @State private var retry = 0
     private enum Destination {
@@ -465,6 +466,7 @@ private final class LibraryModel: ObservableObject {
                 }
             } else { compact }
         }
+        .environmentObject(siteDisplayOrder)
         .task(id: retry) {
             await model.refresh()
             if let session = model.session { await shelf.refresh(session) }
@@ -824,12 +826,12 @@ func thumbnail(at url: URL, maxSize: Int) throws -> CGImage {
     return image
 }
 
-private struct AppleCategoryOption: Identifiable {
+struct AppleCategoryOption: Identifiable {
     let id: String
     let label: String
 }
 
-private let appleCategoryOptions: [AppleCategoryOption] = [
+let appleCategoryOptions: [AppleCategoryOption] = [
     AppleCategoryOption(id: "feed", label: "吃瓜"), AppleCategoryOption(id: "doujin", label: "本子"),
     AppleCategoryOption(id: "anime", label: "里番"), AppleCategoryOption(id: "aiDrama", label: "AI短剧"),
     AppleCategoryOption(id: "jav", label: "JAV"), AppleCategoryOption(id: "adult", label: "成人视频"),
@@ -842,6 +844,7 @@ private let appleCategoryOptions: [AppleCategoryOption] = [
 ]
 
 @MainActor private struct HomeSiteGroups: View {
+    @EnvironmentObject private var displayOrder: SiteDisplayOrder
     let session: ProgressSession
     let library: SourceLibrary
     let interests: [String]
@@ -850,22 +853,64 @@ private let appleCategoryOptions: [AppleCategoryOption] = [
     @State private var sites: [InstalledSite] = []
     @State private var failed = false
     @State private var attempt = 0
+    @State private var dimension = "all"
+    @State private var media = "all"
+    @State private var order: [String] = []
+    @State private var saving = false
+
+    private var categories: [AppleCategoryOption] {
+        discoveryDomains(order: order, dimension: dimension, media: media).compactMap { id in
+            appleCategoryOptions.first { $0.id == id }
+        }
+    }
+
+    private func save(dimension: String, media: String) {
+        guard !saving else { return }
+        saving = true
+        Task {
+            defer { saving = false }
+            do {
+                try await session.setDiscoveryScope(dimension: dimension, media: media)
+                self.dimension = dimension
+                self.media = media
+                failed = false
+            } catch { failed = true }
+        }
+    }
 
     var body: some View {
         Section(header: Text(tr("首页兴趣"))) {
+            Picker(tr("内容范围"), selection: Binding(get: { dimension }, set: { save(dimension: $0, media: media) })) {
+                Text(tr("全部")).tag("all")
+                Text(tr("二次元")).tag("twoD")
+                Text(tr("三次元")).tag("threeD")
+            }.pickerStyle(.menu).disabled(saving)
+            Picker(tr("媒体类型"), selection: Binding(get: { media }, set: { save(dimension: dimension, media: $0) })) {
+                Text(tr("全部")).tag("all")
+                Text(tr("图片")).tag("image")
+                Text(tr("视频")).tag("video")
+                Text(tr("音频")).tag("voice")
+                Text(tr("其他")).tag("other")
+            }.pickerStyle(.menu).disabled(saving)
             if failed { Button(tr("站点加载失败，请重试")) { attempt += 1 } }
-            ForEach(appleCategoryOptions) { option in
-                let rows = sites.filter { $0.category == option.id }
+            ForEach(categories) { option in
+                let rows = displayOrder.ordered(sites.filter { $0.category == option.id })
                 if !rows.isEmpty && (interests.isEmpty || interests.contains(option.id)) {
                     DisclosureGroup(tr(option.label)) {
                         ForEach(rows) { site in Button(site.name ?? site.key) { open(site) } }
                     }
                 }
             }
+        }.onReceive(NotificationCenter.default.publisher(for: .parkSiteOrderChanged)) { _ in
+            attempt += 1
         }.task(id: attempt) {
             do {
+                let settings = try await session.privacySettings()
                 let values = try await session.sites(library)
                 try Task.checkCancellation()
+                dimension = settings.homeDimension ?? "all"
+                media = settings.homeMedia ?? "all"
+                order = settings.domainOrder ?? []
                 sites = values
                 failed = false
             } catch { if !Task.isCancelled { failed = true } }

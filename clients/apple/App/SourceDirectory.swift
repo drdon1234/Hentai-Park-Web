@@ -1,6 +1,59 @@
 import ParkCore
 import SwiftUI
 
+extension Notification.Name {
+  static let parkSiteOrderChanged = Notification.Name("ParkSiteOrderChanged")
+}
+
+@MainActor final class SiteDisplayOrder: ObservableObject {
+  @Published private(set) var elapsed: [String: TimeInterval] = [:]
+  @Published private(set) var measured = false
+
+  func ordered(_ sites: [InstalledSite]) -> [InstalledSite] {
+    guard measured else { return sites }
+    return sites.enumerated().sorted { first, second in
+      let a = elapsed[first.element.id] ?? .infinity, b = elapsed[second.element.id] ?? .infinity
+      return a == b ? first.offset < second.offset : a < b
+    }.map(\.element)
+  }
+
+  func clear() { elapsed = [:]; measured = false }
+
+  func measure(_ session: ProgressSession, library: SourceLibrary) async throws {
+    let sites = try await session.sites(library).filter { $0.unavailable != true && $0.entryFeed != nil }
+    var result: [String: TimeInterval] = [:]
+    await withTaskGroup(of: (String, TimeInterval?).self) { group in
+      var remaining = sites.makeIterator()
+      func submit(_ site: InstalledSite) {
+        group.addTask {
+          let start = ProcessInfo.processInfo.systemUptime
+          let elapsed = await withTaskGroup(of: TimeInterval?.self) { probe in
+            probe.addTask {
+              do {
+                _ = try await session.sitePage(library, site: site, keyword: "", page: 1, cursor: nil)
+                return ProcessInfo.processInfo.systemUptime - start
+              } catch { return nil }
+            }
+            probe.addTask { try? await Task.sleep(nanoseconds: 8_000_000_000); return nil }
+            let first = await probe.next() ?? nil
+            probe.cancelAll()
+            return first
+          }
+          return (site.id, elapsed)
+        }
+      }
+      for _ in 0..<6 { if let site = remaining.next() { submit(site) } }
+      while let (id, time) = await group.next() {
+        if let time { result[id] = time }
+        if !Task.isCancelled, let site = remaining.next() { submit(site) }
+      }
+    }
+    try Task.checkCancellation()
+    elapsed = result
+    measured = true
+  }
+}
+
 enum InstalledSources {
   static let library: SourceLibrary? = {
     guard let resources = Bundle.main.url(forResource: "ParkSources", withExtension: nil),
@@ -12,6 +65,7 @@ enum InstalledSources {
 }
 
 @MainActor struct SourceDirectory: View {
+  @EnvironmentObject private var displayOrder: SiteDisplayOrder
   let session: ProgressSession
   let locale: String
   let incognito: Bool
@@ -46,7 +100,7 @@ enum InstalledSources {
           Button(tr("站点加载失败，请重试")) { retry += 1 }.padding()
         } else if let sites {
           if sites.isEmpty { Text(tr("暂无内容")).padding() }
-          List(sites) { site in
+          List(displayOrder.ordered(sites)) { site in
             Button {
               chosen = site
             } label: {
@@ -71,6 +125,7 @@ enum InstalledSources {
 }
 
 @MainActor struct SiteOrderView: View {
+  @EnvironmentObject private var displayOrder: SiteDisplayOrder
   let session: ProgressSession
   let library: SourceLibrary
   let tr: (String) -> String
@@ -79,6 +134,8 @@ enum InstalledSources {
   @State private var busy = false
   @State private var failed = false
   @State private var confirm = false
+  @State private var categories = false
+  @State private var measuring = false
 
   var body: some View {
     VStack(alignment: .leading) {
@@ -86,33 +143,61 @@ enum InstalledSources {
         Button(tr("返回"), action: back)
         Text(tr("站点管理")).font(.headline)
         Spacer()
-        Button(tr("恢复站点默认顺序")) { confirm = true }
+        Button(tr("恢复站点默认顺序")) { confirm = true }.disabled(measuring)
       }.padding()
+      Button(tr("分类顺序")) { categories = true }
+      if measuring {
+        Button(tr("取消探测")) { measuring = false }
+        ProgressView()
+      } else {
+        Button(tr("测速并自动排序")) { measuring = true }.disabled(rows.isEmpty)
+        if displayOrder.measured { Button(tr("恢复原显示顺序")) { displayOrder.clear() } }
+      }
       if failed { Button(tr("重试")) { Task { await update {} } }.padding(.horizontal) }
       if busy { ProgressView() }
       List(Array(rows.enumerated()), id: \.element.id) { index, row in
         HStack {
           Text(row.name)
+          if let elapsed = displayOrder.elapsed[row.id] {
+            Text("\(Int((elapsed * 1000).rounded())) ms").font(.caption.monospacedDigit())
+          }
           if !row.enabled { Text(tr("未启用")).font(.caption) }
           Spacer()
           Button { move(index, -1) } label: { Image(systemName: "arrow.up") }
             .accessibilityLabel(Text(tr("上移") + " " + row.name)).disabled(index == 0)
           Button { move(index, 1) } label: { Image(systemName: "arrow.down") }
             .accessibilityLabel(Text(tr("下移") + " " + row.name)).disabled(index + 1 == rows.count)
-        }.buttonStyle(.borderless)
+        }.buttonStyle(.borderless).disabled(measuring)
       }
     }.disabled(busy)
+    .sheet(isPresented: $categories) {
+      CategoryOrderView(session: session, tr: tr) { categories = false }
+    }
     .task { await update {} }
+    .task(id: measuring) {
+      guard measuring else { return }
+      do { try await displayOrder.measure(session, library: library) }
+      catch { if !Task.isCancelled { failed = true } }
+      if !Task.isCancelled { measuring = false }
+    }
     .alert(tr("恢复站点默认顺序"), isPresented: $confirm) {
       Button(tr("取消"), role: .cancel) {}
-      Button(tr("恢复")) { Task { await update { try await session.restoreSiteOrder(library) } } }
+      Button(tr("恢复")) { Task { await update {
+        try await session.restoreSiteOrder(library)
+        displayOrder.clear()
+        NotificationCenter.default.post(name: .parkSiteOrderChanged, object: nil)
+      } } }
     } message: { Text(tr("将替换当前手动排列的站点顺序，是否继续？")) }
   }
 
   private func move(_ index: Int, _ offset: Int) {
     guard rows.indices.contains(index + offset) else { return }
     let key = rows[index].id, anchor = rows[index + offset].id
-    Task { await update { try await session.moveSite(library, key: key, anchor: anchor, after: offset > 0) } }
+    Task { await update {
+      try await session.moveSite(library, key: key, anchor: anchor, after: offset > 0)
+      displayOrder.clear()
+      NotificationCenter.default.post(name: .parkSiteOrderChanged, object: nil)
+    } }
   }
 
   private func update(_ change: () async throws -> Void) async {
@@ -124,6 +209,74 @@ enum InstalledSources {
       rows = try await session.managedSites(library)
       failed = false
     } catch { if !Task.isCancelled { failed = true } }
+  }
+}
+
+@MainActor private struct CategoryOrderView: View {
+  let session: ProgressSession
+  let tr: (String) -> String
+  let close: () -> Void
+  @State private var rows: [String] = []
+  @State private var confirm = false
+  @State private var failed = false
+  @State private var saving = false
+  @State private var retry = 0
+
+  var body: some View {
+    VStack(alignment: .leading) {
+      HStack {
+        Button(tr("返回"), action: close)
+        Text(tr("分类顺序")).font(.headline)
+        Spacer()
+        Button(tr("恢复默认顺序")) { confirm = true }
+      }.padding()
+      if failed { Button(tr("重试")) { retry += 1 } }
+      List(Array(rows.enumerated()), id: \.element) { index, id in
+        let label = tr(appleCategoryOptions.first { $0.id == id }?.label ?? id)
+        HStack {
+          Text(label)
+          Spacer()
+          Button { move(index, -1) } label: { Image(systemName: "arrow.up") }
+            .accessibilityLabel(Text(tr("上移") + " " + label)).disabled(index == 0)
+          Button { move(index, 1) } label: { Image(systemName: "arrow.down") }
+            .accessibilityLabel(Text(tr("下移") + " " + label)).disabled(index + 1 == rows.count)
+        }.buttonStyle(.borderless)
+      }
+    }
+    .disabled(saving).interactiveDismissDisabled(saving)
+    .task(id: retry) {
+      do {
+        let prefs = try await session.privacySettings()
+        rows = discoveryDomains(order: prefs.domainOrder ?? [], dimension: "all", media: "all")
+        failed = false
+      } catch { if !Task.isCancelled { failed = true } }
+    }
+    .alert(tr("恢复默认顺序"), isPresented: $confirm) {
+      Button(tr("取消"), role: .cancel) {}
+      Button(tr("恢复")) { save(discoveryDomains(order: [], dimension: "all", media: "all")) }
+    } message: { Text(tr("将替换当前手动排列的分类顺序，是否继续？")) }
+  }
+
+  private func move(_ index: Int, _ offset: Int) {
+    guard rows.indices.contains(index + offset) else { return }
+    var updated = rows
+    updated.swapAt(index, index + offset)
+    save(updated)
+  }
+
+  private func save(_ order: [String]) {
+    guard !saving else { return }
+    saving = true
+    Task {
+      defer { saving = false }
+      do {
+        let json = String(decoding: try JSONEncoder().encode(order), as: UTF8.self)
+        try await session.setPreference("domainOrder", json: json)
+        rows = order
+        NotificationCenter.default.post(name: .parkSiteOrderChanged, object: nil)
+        failed = false
+      } catch { failed = true }
+    }
   }
 }
 

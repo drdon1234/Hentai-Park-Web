@@ -13,6 +13,9 @@ public struct LibraryPrivacy: Decodable, Sendable {
     public let subscriptionNotifications: Bool?
     public let subscriptionNotificationPreview: Bool?
     public let homeCategories: [String]?
+    public let homeDimension: String?
+    public let homeMedia: String?
+    public let domainOrder: [String]?
 
     public var subscriptionHours: Int {
         adultConfirmed == true ? max(0, subscriptionUpdateHours ?? 6) : 0
@@ -113,10 +116,14 @@ public actor ProgressSession {
     }
 
     public func setPreference(_ name: String, json: String) async throws {
-        guard ["language", "homeCategories", "appLockAfter", "subscriptionUpdateHours", "onboarded"].contains(name) else {
+        guard ["language", "homeCategories", "domainOrder", "appLockAfter", "subscriptionUpdateHours", "onboarded"].contains(name) else {
             throw CocoaError(.coderInvalidValue)
         }
         try await run { store, _ in try store.savePreference(name: name, json: json) }
+    }
+
+    public func setDiscoveryScope(dimension: String, media: String) async throws {
+        try await run { store, _ in try store.saveDiscoveryScope(dimension: dimension, media: media) }
     }
 
     public func completeOnboarding(categories: [String], secureScreen: Bool, appLock: Bool, blurCovers: Bool = false) async throws {

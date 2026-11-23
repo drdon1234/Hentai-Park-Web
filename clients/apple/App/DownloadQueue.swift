@@ -154,7 +154,7 @@ import SwiftUI
         ForEach(Array(["等待下载", "下载中", "已暂停", "下载完成", "下载失败"].enumerated()), id: \.offset) { pair in
           Text(tr(pair.element)).tag(Optional(Int32(pair.offset)))
         }
-      }.onChange(of: selection.status) { _ in selection.finish() }
+      }.pickerStyle(.menu).onChange(of: selection.status) { _ in selection.finish() }
       if selection.selecting {
         Button(tr("删除下载")) {
           targets = works.filter { selection.selected.contains($0.libraryID) }

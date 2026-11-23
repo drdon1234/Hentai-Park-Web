@@ -193,7 +193,7 @@ jobs:
                                      "7e3cffb7164fa2a6936a28063262c5f732953cf5c1673befa33e3f21184027c4" if os.environ["EXERCISE_SCOPE"] == "storage" else
                                      "223badab1023e4528c40571bb2a3a1b083bf7d3e591675a897622f425772edce" if os.environ["EXERCISE_SCOPE"] == "full-history" else
                                      "9dc137fa6f259cfb761d812a63cbd7e0c9927f23fb75cc4183e3192b06422407" if os.environ["EXERCISE_SCOPE"] == "download-entry" else
-                                     "3179165a607829ba6c2a9071b0daade1fbe981841ae5833ac2cf72b41bfcc1b7" if os.environ["EXERCISE_SCOPE"] == "shelf-display" else
+                                     "cb12c586ee3213b7cf2a80ec5a066a6b437013f558eb145b2f263808a0d3df36" if os.environ["EXERCISE_SCOPE"] == "shelf-display" else
                                      "fdaf167c7839870c77b0c2efcb178adf5eef6ff3d3c0831c35c015a33f7b05d3" if os.environ["EXERCISE_SCOPE"] == "detail-sections" else
                                      "3dc7d7273a7498a7e433655b0540621ec7eebfcee15a88f39c131796843c3417" if os.environ["EXERCISE_SCOPE"] == "discovery-scope" else
                                      "5e3dcf168c2128d6d2a4dc9a65b6644e8a13d313a3aedb1636e12c0437d5813d" if os.environ["EXERCISE_SCOPE"] == "download-actions" else

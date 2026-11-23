@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-shelf, mac-setup, migration, download-actions, domain-recheck]
+        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-shelf, mac-setup, migration, download-actions, discovery-scope, domain-recheck]
         default: full
 permissions:
   contents: read
@@ -157,7 +157,7 @@ jobs:
       matrix:
         include: >-
           ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record","mac-shelf","mac-setup"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
-          || contains(fromJSON('["media","download-actions"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
+          || contains(fromJSON('["media","download-actions","discovery-scope"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'audio' && '[{"host":"iPhone","runtime":"18.6"}]'
           || inputs.scope == 'domain-recheck' && '[{"host":"iPhone","runtime":"18.6"}]'
           || contains(fromJSON('["movie","domains","reading","pictures","tavern","setup","shelf","collection","migration","game"]'), inputs.scope) && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
@@ -190,6 +190,7 @@ jobs:
               raise SystemExit("构建运行与指定候选或工作流不一致")
           raw = base64.b64decode(os.environ["REVIEWED_SUITE"], validate=True)
           if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(),
+                                     "72bdfa6aa22c6ec90f1c118f1d5872fb6bd02fdbbaa4b5d3e8a3265ac4615f55" if os.environ["EXERCISE_SCOPE"] == "discovery-scope" else
                                      "b4b7bfa6fcdd13011ef935956f36eb5b90eaf60a72311d41551515eb9341e793" if os.environ["EXERCISE_SCOPE"] == "download-actions" else
                                      "ad48a4c806260da134c2fdb1e13774553a943eb314f880a36d8cd34983364172" if os.environ["EXERCISE_SCOPE"] == "setup" else
                                      "4f0d2d13c9ac387a11555983ff1ec11a60d1d425d6e6004087e8135bd427da1f" if os.environ["EXERCISE_SCOPE"] == "shelf" else

@@ -204,9 +204,9 @@ jobs:
                                      "f4d33ef662d41f340f279e0602c342c924e281db963036efd0298c0f57cc10b9" if os.environ["EXERCISE_SCOPE"] == "host-update-management" else
                                      "7bc9df4b9cddc87290bea20978e9e8b1cf1c28a5267d8809e57728e19533f5ec" if os.environ["EXERCISE_SCOPE"] == "host-chapter-actions" else
                                      "dfe2f59775245bc057c8d9e86daea98899f2e0353596c58e6db557c8dc90d3aa" if os.environ["EXERCISE_SCOPE"] == "host-comment-link" else
-                                     "2ab7f6722fda507cb0a63d3d3b4318022bf256d84985c7323234c9845660de08" if os.environ["EXERCISE_SCOPE"] == "host-comments" else
+                                     "0522b556d00f82fe20628aa0ab143f93396b91886950bc6ee86866a7eedf0b22" if os.environ["EXERCISE_SCOPE"] == "host-comments" else
                                      "397b722c771cf7ba979c945a8ae492572423f7a7adf33ccb86b7cc99bb162af4" if os.environ["EXERCISE_SCOPE"] == "host-record-recovery" else
-                                     "a8fd4c4acefb412c210dc4c32a4c70605845a0b7f37159c720d2b5150ad435a7" if os.environ["EXERCISE_SCOPE"] == "host-download-media" else
+                                     "c7f1fbb4a3c171bbf4b5e70ae85ac82f0e69f4a6f0dc0c4be14c300c47be356a" if os.environ["EXERCISE_SCOPE"] == "host-download-media" else
                                      "5562d0c243f89ed2de82280e81db96c1d9a81c6e125f2f101696f6d245116091" if os.environ["EXERCISE_SCOPE"] == "host-dictionaries" else
                                      "70b3b3473947450a96a533fbf7ff621ca2152cd56f31784fe865fa21a0040b00" if os.environ["EXERCISE_SCOPE"] == "host-favorites" else
                                      "5eefb4f4470a4af95acad553b145bb43a8e9384bfd6e2df3cc23f1e043694a72" if os.environ["EXERCISE_SCOPE"] == "host-metadata" else

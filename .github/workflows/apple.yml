@@ -204,7 +204,7 @@ jobs:
                                      "f4d33ef662d41f340f279e0602c342c924e281db963036efd0298c0f57cc10b9" if os.environ["EXERCISE_SCOPE"] == "host-update-management" else
                                      "7bc9df4b9cddc87290bea20978e9e8b1cf1c28a5267d8809e57728e19533f5ec" if os.environ["EXERCISE_SCOPE"] == "host-chapter-actions" else
                                      "dfe2f59775245bc057c8d9e86daea98899f2e0353596c58e6db557c8dc90d3aa" if os.environ["EXERCISE_SCOPE"] == "host-comment-link" else
-                                     "0522b556d00f82fe20628aa0ab143f93396b91886950bc6ee86866a7eedf0b22" if os.environ["EXERCISE_SCOPE"] == "host-comments" else
+                                     "fef9eade6dd41ab0c37898fa23585aefa28b3f9fcd7e21af389e405835ad9d6d" if os.environ["EXERCISE_SCOPE"] == "host-comments" else
                                      "397b722c771cf7ba979c945a8ae492572423f7a7adf33ccb86b7cc99bb162af4" if os.environ["EXERCISE_SCOPE"] == "host-record-recovery" else
                                      "23b5f5d22d2ba5619b7598e4ddca827b6c0409c1977d417d6a5aeda8a21775fc" if os.environ["EXERCISE_SCOPE"] == "host-download-media" else
                                      "5562d0c243f89ed2de82280e81db96c1d9a81c6e125f2f101696f6d245116091" if os.environ["EXERCISE_SCOPE"] == "host-dictionaries" else

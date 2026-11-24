@@ -53,6 +53,15 @@ struct Download {
 }
 
 impl Download {
+    fn from_record(raw: &str, source: &str, work: &str) -> Option<Self> {
+        serde_json::from_str::<Self>(raw).ok().filter(|task| {
+            task.item.source == source
+                && task.item.id == work
+                && (0..=4).contains(&task.status)
+                && matches!(task.media.as_str(), "comic" | "video" | "novel" | "bundle")
+        })
+    }
+
     fn available(&self, id: &str) -> bool {
         matches!(self.media.as_str(), "comic" | "novel" | "video" | "bundle")
             && (self.media == "bundle" || self.completed.iter().any(|key| key == id))
@@ -141,12 +150,7 @@ impl ProgressStore {
             let mut pending_deletion = None;
             let mut download_status = None;
             let (media, downloaded, chapters) = if let Some(raw) = raw {
-                if let Some(mut d) = serde_json::from_str::<Download>(&raw).ok().filter(|d| {
-                    d.item.source == source
-                        && d.item.id == work_id
-                        && (0..=4).contains(&d.status)
-                        && matches!(d.media.as_str(), "comic" | "video" | "novel" | "bundle")
-                }) {
+                if let Some(mut d) = Download::from_record(&raw, &source, &work_id) {
                     let chapters = std::mem::take(&mut d.chapters)
                         .into_iter()
                         .filter(|c| d.available(&c.id))
@@ -220,6 +224,34 @@ impl ProgressStore {
     pub fn favorite_updates(&self,category:Option<i64>) -> Result<String,StorageError> {
         let db=self.lock()?;
         Ok(park_storage::library::updates::view(&db,category)?.to_string())
+    }
+
+    pub fn download_chapters(&self, source: String, work: String) -> Result<Vec<OfflineChapter>, StorageError> {
+        let raw: String = self.lock()?.query_row(
+            "SELECT json FROM download_tasks WHERE source=? AND uid=?",
+            params![source, format!("{source}:{work}")], |row| row.get(0),
+        ).optional()?.ok_or(StorageError::UnavailableDownload)?;
+        let task = Download::from_record(&raw, &source, &work).ok_or(StorageError::InvalidDownload)?;
+        Ok(task.chapters)
+    }
+
+    pub fn remove_invalid_download(&self, source: String, work: String) -> Result<(), StorageError> {
+        let uid = format!("{source}:{work}");
+        let mut db = self.lock()?;
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let raw: Option<String> = tx.query_row(
+            "SELECT json FROM download_tasks WHERE source=? AND uid=?",
+            params![source, uid], |row| row.get(0),
+        ).optional()?;
+        if let Some(raw) = raw {
+            // 用户确认期间记录可能已恢复。此操作永远不访问下载目录。
+            if Download::from_record(&raw, &source, &work).is_some() {
+                return Err(StorageError::InvalidDownload);
+            }
+            tx.execute("DELETE FROM download_tasks WHERE source=? AND uid=?", params![source, uid])?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn set_download_queued(

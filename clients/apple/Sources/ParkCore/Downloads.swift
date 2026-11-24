@@ -74,6 +74,18 @@ extension ProgressSession {
     }
   }
 
+  public func retryDownloadRecord(_ work: LibraryWork) async throws {
+    try await run { store, _ in
+      _ = try store.downloadChapters(source: work.source, work: work.workId)
+    }
+  }
+
+  public func removeInvalidDownloadRecord(_ work: LibraryWork) async throws {
+    try await run { store, _ in
+      try store.removeInvalidDownload(source: work.source, work: work.workId)
+    }
+  }
+
   private func download(
     _ library: SourceLibrary, id: LibraryWorkID, sites: UInt32, works: UInt32, pages: UInt32
   ) async throws -> Bool {

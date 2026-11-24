@@ -559,11 +559,15 @@ private final class LibraryModel: ObservableObject {
             Button(access.tr("重试")) { retry += 1 }
         } else if let rows = model.works {
             let filtered = index == 1 ? shelf.rows(rows) : index == 2 ? downloadSelection.rows(rows) : rows.filter { $0.historyMs != nil }
+            let damaged = index == 2 ? rows.filter(\.invalidDownload) : []
             List {
                 if index == 2 {
                     Button(access.tr("录制分卷")) { destination = .recordings }
                     if let session = model.session {
                         DownloadControls(selection: downloadSelection, works: filtered, session: session, tr: access.tr)
+                        ForEach(damaged, id: \.libraryID) { work in
+                            InvalidDownloadRow(work: work, session: session, tr: access.tr)
+                        }
                     }
                 }
                 if index == 2 && downloads.failed {
@@ -586,7 +590,7 @@ private final class LibraryModel: ObservableObject {
                     }
                 }
                 Section(header: Text(access.tr(index == 0 ? "继续看" : labels[index]))) {
-                    if filtered.isEmpty { Text(access.tr(["没有继续阅读的作品","还没有收藏","没有下载任务"][index])) }
+                    if filtered.isEmpty && damaged.isEmpty { Text(access.tr(["没有继续阅读的作品","还没有收藏","没有下载任务"][index])) }
                     if index == 1, let session = model.session {
                         ShelfWorkGrid(options: shelf, works: filtered, session: session, tr: access.tr,
                             details: { destination = .work($0) }, open: open)

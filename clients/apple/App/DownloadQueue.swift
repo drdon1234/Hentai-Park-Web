@@ -77,6 +77,16 @@ import SwiftUI
     revision += 1
   }
 
+  func recoverRecord(_ work: LibraryWork, remove: Bool, fallback: ProgressSession) async throws {
+    let library = session ?? fallback
+    defer { revision += 1 }
+    if remove { try await library.removeInvalidDownloadRecord(work) }
+    else {
+      try await library.retryDownloadRecord(work)
+      refresh()
+    }
+  }
+
   func removeRead(fallback: ProgressSession) async throws -> UInt64 {
     let count = try await (session ?? fallback).deleteReadDownloads()
     if count > 0 { revision += 1 }
@@ -133,12 +143,51 @@ import SwiftUI
   @Published var selected = Set<LibraryWorkID>()
 
   func rows(_ works: [LibraryWork]) -> [LibraryWork] {
-    works.filter { $0.downloaded && (status == nil || $0.downloadStatus == status) }
+    works.filter { $0.downloaded && !$0.invalidDownload && (status == nil || $0.downloadStatus == status) }
   }
 
   func finish() {
     selected.removeAll()
     selecting = false
+  }
+}
+
+@MainActor struct InvalidDownloadRow: View {
+  let work: LibraryWork
+  let session: ProgressSession
+  let tr: (String) -> String
+  @EnvironmentObject private var queue: DownloadQueue
+  @State private var confirming = false
+  @State private var busy = false
+  @State private var error: String?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(tr("下载记录恢复失败")).font(.headline)
+      Text(work.source)
+      Text(tr("原始记录和本地文件已保留，可以重试或仅移除记录。"))
+      if let error { Text(tr(error)).foregroundStyle(.secondary) }
+      HStack {
+        Button(tr("重试")) { recover(remove: false) }
+        Button(tr("移除记录"), role: .destructive) { confirming = true }
+      }.buttonStyle(.borderless).disabled(busy)
+    }
+    .alert(tr("移除损坏的下载记录？"), isPresented: $confirming) {
+      Button(tr("取消"), role: .cancel) {}
+      Button(tr("移除记录"), role: .destructive) { recover(remove: true) }
+    } message: { Text(tr("只移除无法恢复的下载记录，保留本地文件。")) }
+  }
+
+  private func recover(remove: Bool) {
+    guard !busy else { return }
+    busy = true
+    error = nil
+    Task {
+      defer { busy = false }
+      do {
+        try await queue.recoverRecord(work, remove: remove, fallback: session)
+      } catch { error = remove ? "删除失败，请重试" : "下载记录恢复失败，请前往下载页处理" }
+    }
   }
 }
 

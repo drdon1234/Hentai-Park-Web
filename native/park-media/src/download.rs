@@ -199,14 +199,17 @@ pub async fn attachment(
     Ok(bytes)
 }
 /// 游戏渠道下载是全新的独立文件，只接受文件响应，不把错误页面作为成品交付。
+pub type GameProgress<'a> = &'a (dyn Fn(u64, Option<u64>) -> Result<()> + Sync);
+
 pub async fn game_file(
     transport: &Transport,
     session: &Session,
     line: &VideoSource,
     dir: &Path,
     cancel: &CancellationToken,
+    progress: Option<GameProgress<'_>>,
 ) -> Result<PathBuf> {
-    direct_file(transport, session, line, dir, "file", cancel, true, None).await
+    direct_file(transport, session, line, dir, "file", cancel, true, None, progress).await
 }
 
 async fn direct_file(
@@ -218,6 +221,7 @@ async fn direct_file(
     cancel: &CancellationToken,
     game: bool,
     selection: Option<&Value>,
+    progress: Option<GameProgress<'_>>,
 ) -> Result<PathBuf> {
     let path = file(dir, &format!("{name}.part"))?;
     let journal = format!("{name}.part.json");
@@ -335,12 +339,18 @@ async fn direct_file(
             .to_string()
             .as_bytes(),
     )?;
+    let mut last_report = None;
     while let Some(data) = response.next_chunk().await.map_err(net)? {
         offset = offset.checked_add(data.len() as u64).ok_or(Error::Limit)?;
         if length.is_some_and(|n| offset > n) {
             return Err(Error::Unavailable);
         }
         io(output.write_all(&data))?;
+        if let Some(report)=progress {
+            if last_report.is_none_or(|at:std::time::Instant|at.elapsed()>=Duration::from_millis(500)){
+                report(offset,length)?;last_report=Some(std::time::Instant::now());
+            }
+        }
     }
     if offset == 0 || length.is_some_and(|n| offset != n) {
         return Err(Error::Unavailable);
@@ -536,7 +546,7 @@ pub async fn save(
     cancel: &CancellationToken,
 ) -> Result<PathBuf> {
     if !line.hls {
-        return direct_file(&transport, &session, &line, dir, name, cancel, false, selection).await;
+        return direct_file(&transport, &session, &line, dir, name, cancel, false, selection,None).await;
     }
     file(dir, name)?;
     let client = HlsClient::new(transport, session, line)?;

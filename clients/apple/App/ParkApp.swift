@@ -593,7 +593,10 @@ private final class LibraryModel: ObservableObject {
                     }
                 }
                 Section(header: Text(access.tr(index == 0 ? "继续看" : labels[index]))) {
-                    if filtered.isEmpty && damaged.isEmpty { Text(access.tr(["没有继续阅读的作品","还没有收藏","没有下载任务"][index])) }
+                    if index == 2, let session=model.session {
+                        GameQueueRows(session:session,media:downloadSelection.kind,status:downloadSelection.status,
+                                      showEmpty:filtered.isEmpty && damaged.isEmpty,tr:access.tr)
+                    } else if filtered.isEmpty && damaged.isEmpty { Text(access.tr(["没有继续阅读的作品","还没有收藏","没有下载任务"][index])) }
                     if index == 1, let session = model.session {
                         ShelfWorkGrid(options: shelf, works: filtered, session: session, tr: access.tr,
                             details: { destination = .work($0) }, open: open)

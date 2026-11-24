@@ -745,6 +745,7 @@ private enum DetailDestination: Hashable, Identifiable {
   @State private var dictionaryRevision = 0
   @State private var tagsExpanded = false
   @State private var playingGame = false
+  @State private var browsingGameResources = false
   @State private var browsingVoice = false
   @State private var downloadSheet = false
   @State private var saving = false
@@ -772,6 +773,8 @@ private enum DetailDestination: Hashable, Identifiable {
     } else if browsingVoice, let detail {
       VoiceDirectoryPage(session: session, library: library, site: site.key, work: detail,
         folder: detail.voiceRoot, incognito: incognito, tr: tr, back: { browsingVoice = false })
+    } else if browsingGameResources, let work {
+      GameResourcePage(session: session, library: library, work: work, tr: tr) { browsingGameResources = false }
     } else if playingGame {
       SiteGame(session: session, library: library, site: site.key, work: workId, tr: tr) {
         playingGame = false
@@ -946,6 +949,9 @@ private enum DetailDestination: Hashable, Identifiable {
               }
               if work.contentDomain == "onlineGame" && work.media == "game" {
                 Button(tr("开始游戏")) { playingGame = true }
+              }
+              if site.gameResources {
+                Button(tr("查看游戏资源")) { browsingGameResources = true }
               }
               SiteChapterDirectory(session: session, library: library, detail: detail, work: work, tr: tr,
                                    canDownload: work.media == "comic" || work.media == "novel" || work.media == "video" && site.nativeVideo) { row in

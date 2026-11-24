@@ -16,6 +16,7 @@ import SwiftUI
   private var requested = false
   private var worker: Task<Void, Never>?
   private var session: ProgressSession?
+  private var gameGrants: [[String]: GameLinks] = [:]
   #if os(iOS)
     private var allowance = UIBackgroundTaskIdentifier.invalid
   #endif
@@ -98,6 +99,27 @@ import SwiftUI
     refresh()
   }
 
+  func enqueueGame(_ resolved: ResolvedGameResource, key: [String], title: String, fallback: ProgressSession) async throws {
+    let grant = resolved.links
+    gameGrants[key] = grant
+    do { try await (session ?? fallback).enqueueGame(grant, title: title) }
+    catch {
+      if gameGrants[key] === grant { gameGrants.removeValue(forKey: key) }
+      throw error
+    }
+    Task { [weak self, weak grant] in
+      try? await Task.sleep(nanoseconds: 120_000_000_000)
+      if let self, let grant, self.gameGrants[key] === grant { self.gameGrants.removeValue(forKey: key) }
+    }
+    didEnqueue()
+  }
+
+  func changeGame(_ item: GameDownloadRecord, action: String, fallback: ProgressSession) async throws {
+    try await (session ?? fallback).changeGameDownload(item.key, action: action)
+    if action != "resume" { gameGrants.removeValue(forKey: item.key) }
+    didEnqueue()
+  }
+
   private func startIfNeeded() {
     guard requested, !windows.isEmpty, foreground, let wifi, worker == nil,
       let library = InstalledSources.library else { return }
@@ -113,7 +135,9 @@ import SwiftUI
       do {
         let opened = try await ProgressSession.openApplicationLibrary()
         session = opened
-        try await opened.processDownloads(library, wifi: wifi) {
+        try await opened.processDownloads(library, wifi: wifi, gameGrant: { key in
+          await self.takeGameGrant(key)
+        }) {
           await self.downloadChanged()
         }
       } catch { if !Task.isCancelled { failed = true } }
@@ -128,6 +152,7 @@ import SwiftUI
   }
 
   private func downloadChanged() { revision += 1 }
+  private func takeGameGrant(_ key: [String]) -> GameLinks? { gameGrants.removeValue(forKey: key) }
 
   #if os(iOS)
     private func endAllowance() {

@@ -57,6 +57,15 @@ extension ProgressSession {
     }
   }
 
+  public func enqueueGame(_ links: GameLinks, title: String) async throws {
+    let settings = try await preferences(DownloadPreferences.self)
+    guard settings.adultConfirmed == true else { throw SiteReadError.malformed }
+    let root = try downloadDirectory(configured: settings.downloadDirectory)
+    try await run { store, _ in
+      _ = try links.enqueueDownload(store: store, directory: root.path, title: title)
+    }
+  }
+
   public func setDownloadQueued(_ work: LibraryWork, resume: Bool) async throws {
     try await run { store, _ in
       try store.setDownloadQueued(source: work.source, work: work.workId, resume: resume)
@@ -104,7 +113,8 @@ extension ProgressSession {
 
   /// 一次唤醒持续到队列清空。下载文件、断点及跨窗口并发额度均由核心管理。
   public func processDownloads(
-    _ library: SourceLibrary, wifi: Bool, changed: @escaping @Sendable () async -> Void
+    _ library: SourceLibrary, wifi: Bool, gameGrant: @escaping @Sendable ([String]) async -> GameLinks? = { _ in nil },
+    changed: @escaping @Sendable () async -> Void
   ) async throws {
     let settings = try await preferences(DownloadPreferences.self)
     guard settings.adultConfirmed == true, wifi || settings.downloadWifiOnly != true else { return }
@@ -112,6 +122,7 @@ extension ProgressSession {
     let works = settings.limit(settings.downloadTaskConcurrency, default: 1)
     let pages = settings.limit(settings.downloadConcurrency, default: 3)
     var failed = Set<LibraryWorkID>()
+    var failedGames = Set<[String]>()
     while true {
       try Task.checkCancellation()
       let pending = try await libraryWorks().compactMap { work -> LibraryWorkID? in
@@ -120,6 +131,20 @@ extension ProgressSession {
         return work.libraryID
       }
       let ready = pending.filter { !failed.contains($0) }
+      let games: [GameDownloadRecord]
+      do { games = try await gameDownloads().filter { $0.status == "queued" && !failedGames.contains($0.key) } }
+      catch {
+        try Task.checkCancellation()
+        if ready.isEmpty { throw error }
+        games = []
+      }
+      if let game = games.first {
+        do { try await transferGame(library, key: game.key, grant: await gameGrant(game.key)) }
+        catch where Task.isCancelled { throw CancellationError() }
+        catch { failedGames.insert(game.key) }
+        await changed()
+        if ready.isEmpty { continue }
+      }
       guard !ready.isEmpty else {
         if !pending.isEmpty { throw SiteReadError.malformed }
         return

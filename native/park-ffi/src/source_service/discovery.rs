@@ -170,6 +170,7 @@ impl SourceService {
                     "detail":manifest["capabilities"]["detail"],
                     "comments":manifest["capabilities"]["comments"],
                     "related":manifest["capabilities"]["related"],
+                    "gameResources":manifest["category"]=="game" && manifest["capabilities"]["gameResources"]==true && manifest["capabilities"]["resolveGameResource"]==true,
                     "thumbnails":manifest["capabilities"]["thumbnails"],
                     "random":manifest["capabilities"]["random"],
                     "resolveLink":manifest["capabilities"]["resolveLink"],

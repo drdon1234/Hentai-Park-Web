@@ -116,11 +116,15 @@ pub struct GameOffers {
     host: Arc<RouteHost>,
 }
 
-#[derive(Object)]
+#[derive(Object, Clone)]
 pub struct GameLinks {
     details: Value,
     direct: Option<VideoSource>,
     source: String,
+    work: String,
+    edition: String,
+    channel: String,
+    label: String,
     host: Arc<RouteHost>,
 }
 
@@ -205,7 +209,7 @@ impl GameOffers {
         let (manifest, envelope) = self.catalog.invoke_installed(
             &self.source,
             "resolveGameResource",
-            &[self.work.clone().into(), resource.into(), channel.into()],
+            &[self.work.clone().into(), resource.clone().into(), channel.clone().into()],
             plugins::budget(&request),
             Some(&self.digest),
         )?;
@@ -256,6 +260,10 @@ impl GameOffers {
             details,
             direct,
             source: self.source.clone(),
+            work: self.work.clone(),
+            edition: resource,
+            channel,
+            label: choice["label"].as_str().unwrap_or_default().into(),
             host: self.host.clone(),
         }))
     }
@@ -263,12 +271,27 @@ impl GameOffers {
 
 #[uniffi::export]
 impl GameLinks {
+    pub fn enqueue_download(&self,store:Arc<ProgressStore>,directory:String,title:String)->Result<Arc<GameLinks>> {
+        if self.direct.is_none(){return Err(SourceFailure::Unsupported)}
+        let now:String=store.lock().map_err(|_|SourceFailure::Storage)?
+            .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')",[],|r|r.get(0)).map_err(|_|SourceFailure::Storage)?;
+        let item=json!({"source":self.source,"id":self.work,"title":title,"mediaKind":"game","contentDomain":"game"});
+        let name=park_storage::game_downloads::safe_filename(&self.label);
+        park_storage::game_downloads::enqueue(&store.root,std::path::Path::new(&directory),item,&self.edition,&self.channel,&name,&now).map_err(|_|SourceFailure::Storage)?;
+        Ok(Arc::new(self.clone()))
+    }
     pub fn details(&self) -> String {
         self.details.to_string()
     }
 
     /// 每次显式保存均从头传输，校验通过才把私有临时文件交给系统导出。
     pub fn download(&self, request: Arc<Request>) -> Result<Arc<GameFile>> {
+        self.transfer(request,None)
+    }
+}
+
+impl GameLinks {
+    fn transfer(&self, request:Arc<Request>,progress:Option<park_media::download::GameProgress<'_>>)->Result<Arc<GameFile>> {
         let line = self.direct.as_ref().ok_or(SourceFailure::Unsupported)?;
         let session = self
             .host
@@ -286,6 +309,7 @@ impl GameLinks {
             line,
             dir.path(),
             &request.cancelled,
+            progress,
         ))?;
         Ok(Arc::new(GameFile {
             path,
@@ -298,5 +322,41 @@ impl GameLinks {
 impl GameFile {
     pub fn path(&self) -> String {
         self.path.to_string_lossy().into_owned()
+    }
+}
+
+#[uniffi::export]
+impl ProgressStore {
+    pub fn game_downloads(&self)->std::result::Result<String,crate::StorageError>{
+        park_storage::game_downloads::list(&self.root).map(|rows|Value::Array(rows).to_string()).map_err(|_|crate::StorageError::InvalidDownload)
+    }
+    pub fn change_game_download(&self,identity:Vec<String>,action:String)->std::result::Result<(),crate::StorageError>{
+        let ids:[String;4]=identity.try_into().map_err(|_|crate::StorageError::InvalidDownload)?;
+        park_storage::game_downloads::change(&self.root,ids.each_ref().map(String::as_str),&action).map_err(|_|crate::StorageError::InvalidDownload)
+    }
+}
+
+#[uniffi::export]
+impl SourceService {
+    pub fn run_game_download(&self,store:Arc<ProgressStore>,identity:Vec<String>,resolved:Option<Arc<GameLinks>>,request:Arc<Request>)->Result<()>{
+        use park_storage::game_downloads as queue;
+        let ids:[String;4]=identity.try_into().map_err(|_|SourceFailure::Unsupported)?;
+        let key=ids.each_ref().map(String::as_str);
+        let attempt=queue::claim(&store.root,key).map_err(|_|SourceFailure::Storage)?;
+        let result=(||{
+            let links=if let Some(given)=resolved{
+                if [given.source.as_str(),given.work.as_str(),given.edition.as_str(),given.channel.as_str()]!=key{return Err(SourceFailure::Unsupported)}
+                given
+            }else{
+                let offers=self.game_offers(ids[0].clone(),ids[1].clone(),request.clone())?;
+                // 后台重试从不授权新的原站回复。若站点重新要求确认，用户须回到资源入口。
+                offers.resolve(ids[2].clone(),ids[3].clone(),None,request.clone())?
+            };
+            let report=|bytes,total|queue::progress(&store.root,key,attempt,bytes,total).map_err(|_|park_media::Error::Storage);
+            let file=links.transfer(request.clone(),Some(&report))?;
+            queue::publish(&store.root,key,attempt,&file.path,&links.details,||request.cancelled.is_cancelled()).map_err(|_|SourceFailure::Storage)
+        })();
+        if result.is_err(){queue::finish_error(&store.root,key,attempt,request.cancelled.is_cancelled()).map_err(|_|SourceFailure::Storage)?}
+        result
     }
 }

@@ -65,6 +65,7 @@ public struct InstalledSite: Identifiable, Sendable {
   public let detail: Bool
   public let comments: Bool
   public let related: Bool
+  public let gameResources: Bool
   public let thumbnails: Bool
   public let random: Bool
   fileprivate let resolveLink: Bool
@@ -98,6 +99,7 @@ public struct InstalledSite: Identifiable, Sendable {
     detail = site["detail"] as? Bool == true
     comments = site["comments"] as? Bool == true
     related = site["related"] as? Bool == true
+    gameResources = site["gameResources"] as? Bool == true
     thumbnails = site["thumbnails"] as? Bool == true
     random = site["random"] as? Bool == true
     resolveLink = site["resolveLink"] as? Bool == true

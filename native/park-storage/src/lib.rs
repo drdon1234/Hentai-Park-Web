@@ -3,6 +3,7 @@ pub mod cookies;
 pub mod desktop;
 pub mod dictionaries;
 pub mod downloads;
+pub mod game_downloads;
 pub mod library;
 pub mod plugins;
 pub mod progress;

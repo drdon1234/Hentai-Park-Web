@@ -22,6 +22,7 @@ import UIKit
   let tr: (String) -> String
   let back: () -> Void
   @EnvironmentObject private var queue: DownloadQueue
+  @Environment(\.openURL) private var openURL
   @State private var list: GameResourceList?
   @State private var attempt = 0
   @State private var current: Choice?
@@ -31,6 +32,7 @@ import UIKit
   @State private var busy = false
   @State private var retry = 0
   @State private var copied: String?
+  @State private var openFailed = false
 
   private struct Choice: Equatable {
     let resource: String
@@ -39,6 +41,7 @@ import UIKit
   }
   private func select(_ value: Choice) {
     copied = nil
+    openFailed = false
     resolved = nil
     failure = nil
     current = value
@@ -64,7 +67,7 @@ import UIKit
                   if channel.requiresReply { consent = choice } else { select(choice) }
                 }.disabled(resource.expired || busy)
                 if current == Choice(resource:resource.id,channel:channel), let resolved {
-                  fields(resolved, resource:resource.id, channel:channel.id)
+                  fields(resolved, resource:resource, channel:channel.id)
                 }
               }
             }
@@ -107,7 +110,7 @@ import UIKit
     } message: { choice in Text(choice.channel.replyText) }
   }
 
-  @ViewBuilder private func fields(_ result: ResolvedGameResource, resource: String, channel: String) -> some View {
+  @ViewBuilder private func fields(_ result: ResolvedGameResource, resource: SiteGameResource, channel: String) -> some View {
     let data = result.fields
     if data.confirmRequired == true {
       Text(tr("请在站点页面中完成确认后继续"))
@@ -115,7 +118,9 @@ import UIKit
     } else {
       ForEach(Array((data.urls ?? []).enumerated()), id: \.offset) { index, value in
         VStack(alignment:.leading) {
-          if let url=URL(string:value) { Link(tr("打开链接"), destination:url) }
+          if data.direct != true, let url=URL(string:value) {
+            Button(tr("打开链接")) { openURL(url) { accepted in openFailed = !accepted } }
+          }
           Text(value).textSelection(.enabled)
           copyButton("复制",value)
           let codes=data.extractionCodes ?? []
@@ -127,19 +132,34 @@ import UIKit
         Text(tr("解压密码")+" · "+password)
         copyButton("复制解压密码",password)
       }
+      if openFailed { Text(tr("无法打开链接，请复制后手动打开")) }
+      copyButton("复制全部", combinedFields(data, title:work.title))
       if data.direct == true {
         Button(tr("直链下载")) {
           busy=true
           Task {
             defer { busy=false }
             do {
-              try await queue.enqueueGame(result,key:[work.source,work.workId,resource,channel],title:work.title,fallback:session)
+              try await queue.enqueueGame(result,key:[work.source,work.workId,resource.id,channel],title:work.title,fallback:session)
               resolved=nil
             } catch { failure="下载失败" }
           }
         }.disabled(busy)
       }
     }
+    Button(tr("关闭")) { resolved=nil;current=nil;copied=nil;openFailed=false }
+  }
+  private func combinedFields(_ fields: ResolvedGameResource.Fields, title: String) -> String {
+    var lines = [title]
+    let codes = fields.extractionCodes ?? []
+    for (index, url) in (fields.urls ?? []).enumerated() {
+      let label = tr("链接 {number}").replacingOccurrences(of:"{number}", with:String(index + 1))
+      lines += ["",label + ": " + url]
+      let code = codes.indices.contains(index) && !codes[index].isEmpty ? codes[index] : fields.extractionCode ?? ""
+      if !code.isEmpty { lines.append(tr("提取码") + ": " + code) }
+    }
+    if let password = fields.archivePassword, !password.isEmpty { lines += ["",tr("解压密码") + ": " + password] }
+    return lines.joined(separator:"\n")
   }
   private func copyButton(_ key:String,_ value:String) -> some View {
     Button(tr(copied==value ? "已复制" : key)) { copyGameField(value);copied=value }.buttonStyle(.borderless)

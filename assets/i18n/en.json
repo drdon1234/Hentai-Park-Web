@@ -2092,5 +2092,9 @@
   "首页兴趣": "Home interests",
   "完成设置": "Finish setup",
   "批量选择": "Select multiple",
-  "删除下载": "Delete downloads"
+  "删除下载": "Delete downloads",
+  "混合": "Mixed media",
+  "未知": "Unknown",
+  "复制提取码": "Copy extraction code",
+  "复制解压密码": "Copy archive password"
 }

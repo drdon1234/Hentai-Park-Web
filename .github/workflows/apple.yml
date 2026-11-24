@@ -206,7 +206,7 @@ jobs:
                                      "dfe2f59775245bc057c8d9e86daea98899f2e0353596c58e6db557c8dc90d3aa" if os.environ["EXERCISE_SCOPE"] == "host-comment-link" else
                                      "0522b556d00f82fe20628aa0ab143f93396b91886950bc6ee86866a7eedf0b22" if os.environ["EXERCISE_SCOPE"] == "host-comments" else
                                      "397b722c771cf7ba979c945a8ae492572423f7a7adf33ccb86b7cc99bb162af4" if os.environ["EXERCISE_SCOPE"] == "host-record-recovery" else
-                                     "c7f1fbb4a3c171bbf4b5e70ae85ac82f0e69f4a6f0dc0c4be14c300c47be356a" if os.environ["EXERCISE_SCOPE"] == "host-download-media" else
+                                     "23b5f5d22d2ba5619b7598e4ddca827b6c0409c1977d417d6a5aeda8a21775fc" if os.environ["EXERCISE_SCOPE"] == "host-download-media" else
                                      "5562d0c243f89ed2de82280e81db96c1d9a81c6e125f2f101696f6d245116091" if os.environ["EXERCISE_SCOPE"] == "host-dictionaries" else
                                      "70b3b3473947450a96a533fbf7ff621ca2152cd56f31784fe865fa21a0040b00" if os.environ["EXERCISE_SCOPE"] == "host-favorites" else
                                      "5eefb4f4470a4af95acad553b145bb43a8e9384bfd6e2df3cc23f1e043694a72" if os.environ["EXERCISE_SCOPE"] == "host-metadata" else

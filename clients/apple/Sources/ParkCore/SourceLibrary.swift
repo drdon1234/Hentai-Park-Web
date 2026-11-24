@@ -462,7 +462,7 @@ extension ProgressSession {
         media: media, source: site.key, workId: item.id, title: item.title, categoryNames: [],
         favorite: starred,
         historyMs: nil, historyChapter: nil, historyPage: 0, chapters: chapters,
-        contentDomain: domain)
+        contentDomain: domain, itemKind: media)
     }
     if favorite != nil { await Self.favoritesChanged([work.libraryID]) }
     return work

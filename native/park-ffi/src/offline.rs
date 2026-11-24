@@ -25,6 +25,7 @@ pub struct LibraryWork {
     pub history_page: i64,
     pub chapters: Vec<OfflineChapter>,
     pub content_domain: Option<String>,
+    pub item_kind: Option<String>,
 }
 
 #[derive(Debug, Deserialize, uniffi::Record)]
@@ -128,7 +129,10 @@ impl ProgressStore {
             "WITH ids(source,id) AS (SELECT source,id FROM works UNION SELECT source,substr(uid,length(source)+2) FROM download_tasks WHERE substr(uid,1,length(source)+1)=source||':')
             SELECT d.json,ids.source,ids.id,w.title,COALESCE(w.favorite,0),h.time,h.chapter_id,h.page,w.json,w.reader_mode,
             COALESCE(json_extract(CASE WHEN json_valid(w.json) THEN w.json END,'$.contentDomain'),
-                     json_extract(CASE WHEN json_valid(d.json) THEN d.json END,'$.item.contentDomain'))
+                     json_extract(CASE WHEN json_valid(d.json) THEN d.json END,'$.item.contentDomain')),
+            CASE WHEN d.uid IS NOT NULL THEN
+                CASE WHEN json_type(CASE WHEN json_valid(d.json) THEN d.json END,'$.item.mediaKind')='text' THEN json_extract(d.json,'$.item.mediaKind') END
+            WHEN json_type(CASE WHEN json_valid(w.json) THEN w.json END,'$.mediaKind')='text' THEN json_extract(w.json,'$.mediaKind') END
             FROM ids LEFT JOIN works w ON ids.source=w.source AND ids.id=w.id
             LEFT JOIN download_tasks d ON d.uid=ids.source||':'||ids.id AND d.source=ids.source
             LEFT JOIN history h ON h.source=ids.source AND h.work_id=ids.id
@@ -216,6 +220,8 @@ impl ProgressStore {
                 chapters,
                 category_names,
                 content_domain: row.get(10)?,
+                item_kind: row.get::<_, Option<String>>(11)?.filter(|kind| matches!(kind.as_str(),
+                    "comic" | "video" | "voice" | "novel" | "tavern" | "game" | "article" | "mixed" | "unknown")),
             });
         }
         Ok(works)

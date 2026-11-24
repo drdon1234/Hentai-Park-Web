@@ -559,12 +559,15 @@ private final class LibraryModel: ObservableObject {
             Button(access.tr("重试")) { retry += 1 }
         } else if let rows = model.works {
             let filtered = index == 1 ? shelf.rows(rows) : index == 2 ? downloadSelection.rows(rows) : rows.filter { $0.historyMs != nil }
-            let damaged = index == 2 ? rows.filter(\.invalidDownload) : []
+            let damaged = index == 2 && (downloadSelection.status == nil || downloadSelection.status == 4)
+                ? rows.filter(\.invalidDownload) : []
             List {
                 if index == 2 {
                     Button(access.tr("录制分卷")) { destination = .recordings }
                     if let session = model.session {
-                        DownloadControls(selection: downloadSelection, works: filtered, session: session, tr: access.tr)
+                        DownloadControls(selection: downloadSelection, works: filtered,
+                                         untypedSources: Set(rows.filter { $0.downloaded && !$0.invalidDownload && $0.itemKind == nil }.map(\.source)),
+                                         session: session, tr: access.tr)
                         ForEach(damaged, id: \.libraryID) { work in
                             InvalidDownloadRow(work: work, session: session, tr: access.tr)
                         }

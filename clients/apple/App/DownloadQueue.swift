@@ -139,11 +139,23 @@ import SwiftUI
 
 @MainActor final class DownloadSelection: ObservableObject {
   @Published var status: Int32?
+  @Published var kind: String?
+  @Published private var siteKinds: [String: String] = [:]
   @Published var selecting = false
   @Published var selected = Set<LibraryWorkID>()
 
   func rows(_ works: [LibraryWork]) -> [LibraryWork] {
-    works.filter { $0.downloaded && !$0.invalidDownload && (status == nil || $0.downloadStatus == status) }
+    works.filter { work in
+      work.downloaded && !work.invalidDownload && (status == nil || work.downloadStatus == status)
+        && (kind == nil || kind == (work.itemKind ?? siteKinds[work.source] ?? "comic"))
+    }
+  }
+
+  func loadSiteKinds(_ session: ProgressSession) async throws {
+    guard let library = InstalledSources.library else { return }
+    let sites = try await session.sites(library)
+    try Task.checkCancellation()
+    siteKinds = sites.reduce(into: [:]) { $0[$1.key] = $1.mediaType }
   }
 
   func finish() {
@@ -195,15 +207,25 @@ import SwiftUI
   @ObservedObject var selection: DownloadSelection
   @EnvironmentObject private var queue: DownloadQueue
   let works: [LibraryWork]
+  let untypedSources: Set<String>
   let session: ProgressSession
   let tr: (String) -> String
   @State private var confirming = false
   @State private var targets: [LibraryWork] = []
   @State private var busy = false
   @State private var failed = false
+  @State private var catalogFailed = false
+  @State private var catalogRetry = 0
 
   var body: some View {
     Section {
+      Picker(tr("媒体类型"), selection: $selection.kind) {
+        Text(tr("全部")).tag(nil as String?)
+        ForEach([("comic", "漫画"), ("video", "视频"), ("voice", "音声"), ("novel", "小说"), ("tavern", "酒馆"),
+                 ("game", "游戏"), ("article", "吃瓜"), ("mixed", "混合"), ("unknown", "未知")], id: \.0) { kind, label in
+          Text(tr(label)).tag(Optional(kind))
+        }
+      }.pickerStyle(.menu).onChange(of: selection.kind) { _ in selection.finish() }
       Picker(tr("下载状态"), selection: $selection.status) {
         Text(tr("全部")).tag(nil as Int32?)
         ForEach(Array(["等待下载", "下载中", "已暂停", "下载完成", "下载失败"].enumerated()), id: \.offset) { pair in
@@ -220,6 +242,16 @@ import SwiftUI
         Button(tr("批量选择")) { selection.selecting = true }.disabled(works.isEmpty)
       }
       if failed { Text(tr("删除失败，请重试")) }
+      if catalogFailed {
+        Text(tr("站点加载失败，请重试"))
+        Button(tr("重试")) { catalogRetry += 1 }
+      }
+    }
+    .task(id: CatalogRequest(sources: selection.kind == nil ? [] : untypedSources, retry: catalogRetry)) {
+      catalogFailed = false
+      guard selection.kind != nil, !untypedSources.isEmpty else { return }
+      do { try await selection.loadSiteKinds(session) }
+      catch { if !Task.isCancelled { catalogFailed = true } }
     }
     .disabled(busy)
     .alert(tr("删除下载？"), isPresented: $confirming) {
@@ -241,5 +273,10 @@ import SwiftUI
       Text(tr("从下载列表移除「{title}」并删除已下载内容？")
         .replacingOccurrences(of: "{title}", with: targets.map(\.title).joined(separator: "\n")))
     }
+  }
+
+  private struct CatalogRequest: Equatable {
+    let sources: Set<String>
+    let retry: Int
   }
 }

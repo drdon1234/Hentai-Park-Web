@@ -11,6 +11,110 @@ private extension View {
     }
 }
 
+@MainActor struct ShelfCategoryManager: View {
+    let session: ProgressSession
+    let tr: (String) -> String
+    let back: () -> Void
+    @State private var rows: [LibraryCategory]?
+    @State private var revision = 0
+    @State private var editing = false
+    @State private var deleting = false
+    @State private var target: LibraryCategory?
+    @State private var draft = ""
+    @State private var message: String?
+    @State private var busy = false
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            HStack {
+                Button(tr("返回"), action: back)
+                Text(tr("管理分类")).font(.headline)
+                Spacer()
+                Button(tr("新建分类")) { edit(nil) }.disabled(rows == nil)
+            }.padding()
+            if let message { Text(tr(message)).padding(.horizontal) }
+            if let rows {
+                if rows.isEmpty {
+                    Text(tr("还没有分类")).padding()
+                    Text(tr("分类用于整理收藏和下载；一部作品可以同时属于多个分类")).padding(.horizontal)
+                }
+                List {
+                    ForEach(rows, id: \.id) { row in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(row.name)
+                                Text(tr("{value0} 部作品").replacingOccurrences(of: "{value0}", with: String(row.count))).font(.caption)
+                            }
+                            Spacer()
+                            Menu {
+                                Button(tr("重命名")) { edit(row) }
+                                Button(tr("上移")) { move(row.id, by: -1) }.disabled(row.id == rows.first?.id)
+                                Button(tr("下移")) { move(row.id, by: 1) }.disabled(row.id == rows.last?.id)
+                                Button(tr("删除"), role: .destructive) { target = row; deleting = true }
+                            } label: { Image(systemName: "ellipsis.circle") }
+                            .accessibilityLabel(tr("更多") + " · " + row.name)
+                        }
+                    }
+                }
+            } else if message == nil { ProgressView() }
+            else { Button(tr("重试")) { revision += 1 } }
+        }
+        .disabled(busy)
+        .task(id: revision) {
+            do {
+                let fresh = try await session.shelfCategories()
+                try Task.checkCancellation()
+                rows = fresh
+            } catch { if !Task.isCancelled { message = "加载失败"; rows = nil } }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .parkFavoritesChanged)) { _ in revision += 1 }
+        .sheet(isPresented: $editing) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(tr(target == nil ? "新建分类" : "重命名分类")).font(.headline)
+                TextField(tr("分类"), text: $draft).textFieldStyle(.roundedBorder).onSubmit(save)
+                HStack {
+                    Button(tr("取消"), role: .cancel) { editing = false }
+                    Button(tr("确定"), action: save).keyboardShortcut(.defaultAction)
+                }
+            }.padding()
+        }
+        .alert(tr("删除分类「{value0}」？").replacingOccurrences(of: "{value0}", with: target?.name ?? ""), isPresented: $deleting) {
+            Button(tr("取消"), role: .cancel) {}
+            Button(tr("删除"), role: .destructive) {
+                if let id = target?.id { write { try await session.removeShelfCategory(id) } }
+            }
+        } message: { Text(tr("分类中的作品不会被取消收藏；不再属于任何分类的作品会出现在\"默认\"中。")) }
+    }
+
+    private func edit(_ row: LibraryCategory?) {
+        target = row; draft = row?.name ?? ""; message = nil; editing = true
+    }
+
+    private func save() {
+        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = target?.id
+        editing = false
+        if !name.isEmpty { write(conflict: "分类名称为空或已存在") { try await session.nameShelfCategory(name, id: id) } }
+    }
+
+    private func move(_ id: Int64, by step: Int) {
+        guard var order = rows?.map(\.id), let from = order.firstIndex(of: id), order.indices.contains(from + step) else { return }
+        order.swapAt(from, from + step)
+        write { try await session.reorderShelfCategories(order) }
+    }
+
+    private func write(conflict: String = "保存失败，请重试", _ change: @escaping @MainActor () async throws -> Void) {
+        guard !busy else { return }
+        busy = true; message = nil
+        Task {
+            defer { busy = false }
+            do { try await change() }
+            catch StorageError.Conflict { message = conflict; revision += 1 }
+            catch { message = "保存失败，请重试" }
+        }
+    }
+}
+
 @MainActor private struct ShelfMigration: View {
     let work: LibraryWork
     let session: ProgressSession
@@ -299,6 +403,7 @@ private extension View {
     let sources: [String]
     let incognito: Bool
     let tr: (String) -> String
+    let manageCategories: () -> Void
     @State private var panel: Panel?
     @State private var draft = ShelfPreferences()
     @State private var searchDraft = ""
@@ -330,6 +435,7 @@ private extension View {
                     failed = false; panel = .filters
                 }
                 action("批量选择") { options.selecting = true }
+                action("管理分类", manageCategories)
             }
             if failed { Text(tr("保存失败，请重试")).foregroundColor(.secondary) }
             if !outcome.isEmpty { Text(outcome) }
@@ -425,7 +531,7 @@ private extension View {
                 working = true
                 Task {
                     defer { working = false }
-                    do { try await session.createShelfCategory(name); await options.refresh(session); name = ""; failed = false }
+                    do { try await session.nameShelfCategory(name); await options.refresh(session); name = ""; failed = false }
                     catch { failed = true }
                 }
             }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

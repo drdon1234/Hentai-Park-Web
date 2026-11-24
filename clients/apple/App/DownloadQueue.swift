@@ -243,6 +243,7 @@ import SwiftUI
   @State private var catalogFailed = false
   @State private var catalogRetry = 0
   let showExports: () -> Void
+  let manageCategories: () -> Void
 
   var body: some View {
     Section {
@@ -268,6 +269,7 @@ import SwiftUI
       } else {
         Button(tr("批量选择")) { selection.selecting = true }.disabled(works.isEmpty)
         Button(tr("导出文件"), action: showExports)
+        Button(tr("管理分类"), action: manageCategories)
       }
       if failed { Text(tr("删除失败，请重试")) }
       if catalogFailed {

@@ -420,7 +420,7 @@ private final class LibraryModel: ObservableObject {
     @State private var group = 0
     @State private var retry = 0
     private enum Destination {
-        case sites, manageSites, search, subscriptions, updates, rankings, recordings, settings
+        case sites, manageSites, search, subscriptions, updates, rankings, recordings, settings, categories
         case site(InstalledSite)
         case references(String, [InstalledSite])
         case work(LibraryWork), chapter(ChapterKey)
@@ -573,7 +573,8 @@ private final class LibraryModel: ObservableObject {
                     if let session = model.session {
                         DownloadControls(selection: downloadSelection, works: filtered,
                                          untypedSources: Set(rows.filter { $0.downloaded && !$0.invalidDownload && $0.itemKind == nil }.map(\.source)),
-                                         session: session, tr: access.tr, showExports: { showingComicExports = true })
+                                         session: session, tr: access.tr, showExports: { showingComicExports = true },
+                                         manageCategories: { destination = .categories })
                         ForEach(damaged, id: \.libraryID) { work in
                             InvalidDownloadRow(work: work, session: session, tr: access.tr)
                         }
@@ -595,7 +596,7 @@ private final class LibraryModel: ObservableObject {
                     if let session = model.session {
                         ShelfControls(options: shelf, session: session, visible: filtered,
                             sources: Array(Set(rows.filter(\.favorite).map(\.source))).sorted(),
-                            incognito: access.privacy?.incognito == true, tr: access.tr)
+                            incognito: access.privacy?.incognito == true, tr: access.tr, manageCategories: { destination = .categories })
                     }
                 }
                 Section(header: Text(access.tr(index == 0 ? "继续看" : labels[index]))) {
@@ -682,7 +683,9 @@ private final class LibraryModel: ObservableObject {
     }
 
     @ViewBuilder private func detail(showBack: Bool) -> some View {
-        if case .updates? = destination, let session = model.session {
+        if case .categories? = destination, let session = model.session {
+            ShelfCategoryManager(session: session, tr: access.tr, back: leaveChapter)
+        } else if case .updates? = destination, let session = model.session {
             FavoriteUpdatesPage(session: session, locale: access.locale, incognito: access.privacy?.incognito == true,
                                 tr: access.tr, back: leaveChapter)
         } else if case .subscriptions? = destination, let session = model.session {

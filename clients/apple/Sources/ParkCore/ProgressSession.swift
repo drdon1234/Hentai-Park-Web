@@ -214,8 +214,18 @@ public actor ProgressSession {
         }
     }
 
-    public func createShelfCategory(_ name: String) async throws {
-        try await run { store, _ in try store.nameCategory(id: nil, name: name) }
+    public func nameShelfCategory(_ name: String, id: Int64? = nil) async throws {
+        try await run { store, _ in try store.nameCategory(id: id, name: name) }
+        await Self.favoritesChanged([])
+    }
+
+    public func removeShelfCategory(_ id: Int64) async throws {
+        try await run { store, _ in try store.removeCategory(id: id) }
+        await Self.favoritesChanged([])
+    }
+
+    public func reorderShelfCategories(_ ids: [Int64]) async throws {
+        try await run { store, _ in try store.reorderCategories(ordered: ids) }
         await Self.favoritesChanged([])
     }
 

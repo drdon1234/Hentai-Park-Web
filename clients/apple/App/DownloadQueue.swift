@@ -186,7 +186,7 @@ import SwiftUI
       defer { busy = false }
       do {
         try await queue.recoverRecord(work, remove: remove, fallback: session)
-      } catch { error = remove ? "删除失败，请重试" : "下载记录恢复失败，请前往下载页处理" }
+      } catch { self.error = remove ? "删除失败，请重试" : "下载记录恢复失败，请前往下载页处理" }
     }
   }
 }

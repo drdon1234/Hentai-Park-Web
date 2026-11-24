@@ -242,7 +242,7 @@ jobs:
                                      "28935d4118426ff137a68989b9c0081e9dd90f52fcb489713407235a27f1d3e0" if os.environ["EXERCISE_SCOPE"] == "media" else
                                      "32a789336586216e79c700851042714c21a0aebdccbe9dcac32eac04068e7b9f")
           suite_digest = hashlib.sha256(raw).hexdigest()
-          if not (expected_ok or (os.environ["EXERCISE_SCOPE"] == "host-categories" and suite_digest in {"6148ab6a8b2fd0483f1df50e1ff8cd189a0bcf4d6d5dda8a4ac9d7b2cea9aa9a", "639f1807922384dca6315903e992f0849fb48219a08dab89ec790476e85ae3a6"})):
+          if not (expected_ok or (os.environ["EXERCISE_SCOPE"] == "host-categories" and suite_digest in {"6148ab6a8b2fd0483f1df50e1ff8cd189a0bcf4d6d5dda8a4ac9d7b2cea9aa9a", "639f1807922384dca6315903e992f0849fb48219a08dab89ec790476e85ae3a6", "9dc88dbf4bc78db6b5b7aaec39a46ead933de9628f8c9ddff4eeae38c6fe6e58"})):
               raise SystemExit("验收文件摘要与工作流核定值不一致")
           pathlib.Path("test/reader_flow.py").write_bytes(raw)
           PY

@@ -106,6 +106,35 @@ fn available_channel<'a>(rows: &'a [Value], resource: &str, channel: &str) -> Re
         .ok_or(SourceFailure::Unsupported)
 }
 
+fn confirmed_choice<'a>(
+    rows: &'a [Value],
+    resource: &str,
+    channel: &str,
+    confirmed_reply: Option<&str>,
+) -> Result<&'a Value> {
+    let choice = available_channel(rows, resource, channel)?;
+    let reply = if choice["requiresReply"] == true {
+        choice["replyText"].as_str()
+    } else {
+        None
+    };
+    if confirmed_reply != reply {
+        return Err(SourceFailure::Unsupported);
+    }
+    Ok(choice)
+}
+
+fn validate_choice(choice: &Value, latest: &[Value], resource: &str, channel: &str) -> Result<()> {
+    let current = available_channel(latest, resource, channel)?;
+    if ["kind", "requiresReply", "replyText"]
+        .iter()
+        .any(|key| choice[*key] != current[*key])
+    {
+        return Err(SourceFailure::Unsupported);
+    }
+    Ok(())
+}
+
 #[derive(Object)]
 pub struct GameOffers {
     catalog: Arc<SourceCatalog>,
@@ -182,15 +211,7 @@ impl GameOffers {
         confirmed_reply: Option<String>,
         request: Arc<Request>,
     ) -> Result<Arc<GameLinks>> {
-        let choice = available_channel(&self.rows, &resource, &channel)?;
-        let reply = if choice["requiresReply"] == true {
-            choice["replyText"].as_str()
-        } else {
-            None
-        };
-        if confirmed_reply.as_deref() != reply {
-            return Err(SourceFailure::Unsupported);
-        }
+        let choice = confirmed_choice(&self.rows, &resource, &channel, confirmed_reply.as_deref())?;
         let (_, preview) = self.catalog.invoke_installed(
             &self.source,
             "gameResources",
@@ -199,85 +220,125 @@ impl GameOffers {
             Some(&self.digest),
         )?;
         let latest = offers(downloads::checked(preview)?)?;
-        let current = available_channel(&latest, &resource, &channel)?;
-        if ["kind", "requiresReply", "replyText"]
-            .iter()
-            .any(|key| choice[*key] != current[*key])
-        {
-            return Err(SourceFailure::Unsupported);
-        }
+        validate_choice(choice, &latest, &resource, &channel)?;
         let (manifest, envelope) = self.catalog.invoke_installed(
             &self.source,
             "resolveGameResource",
-            &[self.work.clone().into(), resource.clone().into(), channel.clone().into()],
+            &[
+                self.work.clone().into(),
+                resource.clone().into(),
+                channel.clone().into(),
+            ],
             plugins::budget(&request),
             Some(&self.digest),
         )?;
-        let mut direct = None;
-        let details = if envelope["ok"] == false && envelope["error"]["code"] == "CONFIRM_REQUIRED"
-        {
-            let original = manual_read::confirmation_page(&manifest, &envelope["error"]["url"]);
-            json!({"confirmRequired":true,"original":original.map(|u| u.to_string())})
-        } else {
-            let value = downloads::checked(envelope)?;
-            if value["kind"] != choice["kind"] {
-                return Err(SourceFailure::Unsupported);
-            }
-            let urls = if value["kind"] == "direct" {
-                // 原有动态媒体域授权适用于本次解析；传输分区不携带原站凭据。
-                let address = field(&value, "url", 16384)?;
-                let origin = manifest["media"]["origin"]
-                    .as_str()
-                    .ok_or(SourceFailure::Unsupported)?;
-                direct = Some(VideoSource::from_plugin(
-                    &manifest,
-                    &json!({"url":address,
-                    "headers":{"referer":format!("{}/", origin.trim_end_matches('/'))}}),
-                )?);
-                vec![address.to_owned()]
-            } else {
-                let values = if value["urls"].is_null() {
-                    vec![field(&value, "url", 16384)?.to_owned()]
-                } else {
-                    labels(&value, "urls", 16384)?
-                };
-                if values.is_empty() {
-                    return Err(SourceFailure::Unsupported);
-                }
-                values
-                    .iter()
-                    .map(|s| external_address(s).map(|url| url.to_string()))
-                    .collect::<Result<Vec<_>>>()?
-            };
-            let codes = labels(&value, "extractionCodes", 16384)?;
-            if !value["extractionCodes"].is_null() && codes.len() != urls.len() {
-                return Err(SourceFailure::Unsupported);
-            }
-            json!({"urls":urls,"direct":direct.is_some(),"filename":field(&value,"filename",2048)?,
-                "extractionCodes":codes,"extractionCode":field(&value,"extractionCode",16384)?,"archivePassword":field(&value,"archivePassword",16384)?})
-        };
-        Ok(Arc::new(GameLinks {
-            details,
-            direct,
-            source: self.source.clone(),
-            work: self.work.clone(),
-            edition: resource,
+        build_links(
+            &self.host,
+            &self.source,
+            &self.work,
+            resource,
             channel,
-            label: choice["label"].as_str().unwrap_or_default().into(),
-            host: self.host.clone(),
-        }))
+            choice,
+            &manifest,
+            envelope,
+        )
     }
+}
+
+fn build_links(
+    host: &Arc<RouteHost>,
+    source: &str,
+    work: &str,
+    resource: String,
+    channel: String,
+    choice: &Value,
+    manifest: &Value,
+    envelope: Value,
+) -> Result<Arc<GameLinks>> {
+    let mut direct = None;
+    let details = if envelope["ok"] == false && envelope["error"]["code"] == "CONFIRM_REQUIRED" {
+        let original = manual_read::confirmation_page(manifest, &envelope["error"]["url"]);
+        json!({"confirmRequired":true,"original":original.map(|u| u.to_string())})
+    } else {
+        let value = downloads::checked(envelope)?;
+        if value["kind"] != choice["kind"] {
+            return Err(SourceFailure::Unsupported);
+        }
+        let urls = if value["kind"] == "direct" {
+            // 原有动态媒体域授权适用于本次解析；传输分区不携带原站凭据。
+            let address = field(&value, "url", 16384)?;
+            let origin = manifest["media"]["origin"]
+                .as_str()
+                .ok_or(SourceFailure::Unsupported)?;
+            direct = Some(VideoSource::from_plugin(
+                manifest,
+                &json!({"url":address,
+                    "headers":{"referer":format!("{}/", origin.trim_end_matches('/'))}}),
+            )?);
+            vec![address.to_owned()]
+        } else {
+            let values = if value["urls"].is_null() {
+                vec![field(&value, "url", 16384)?.to_owned()]
+            } else {
+                labels(&value, "urls", 16384)?
+            };
+            if values.is_empty() {
+                return Err(SourceFailure::Unsupported);
+            }
+            values
+                .iter()
+                .map(|s| external_address(s).map(|url| url.to_string()))
+                .collect::<Result<Vec<_>>>()?
+        };
+        let codes = labels(&value, "extractionCodes", 16384)?;
+        if !value["extractionCodes"].is_null() && codes.len() != urls.len() {
+            return Err(SourceFailure::Unsupported);
+        }
+        json!({"urls":urls,"direct":direct.is_some(),"filename":field(&value,"filename",2048)?,
+                "extractionCodes":codes,"extractionCode":field(&value,"extractionCode",16384)?,"archivePassword":field(&value,"archivePassword",16384)?})
+    };
+    Ok(Arc::new(GameLinks {
+        details,
+        direct,
+        source: source.to_owned(),
+        work: work.to_owned(),
+        edition: resource,
+        channel,
+        label: choice["label"].as_str().unwrap_or_default().into(),
+        host: host.clone(),
+    }))
 }
 
 #[uniffi::export]
 impl GameLinks {
-    pub fn enqueue_download(&self,store:Arc<ProgressStore>,directory:String,title:String)->Result<Arc<GameLinks>> {
-        if self.direct.is_none(){return Err(SourceFailure::Unsupported)}
-        let now:String=store.lock().map_err(|_|SourceFailure::Storage)?
-            .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')",[],|r|r.get(0)).map_err(|_|SourceFailure::Storage)?;
-        let item=json!({"source":self.source,"id":self.work,"title":title,"mediaKind":"game","contentDomain":"game"});
-        let name=park_storage::game_downloads::safe_filename(&self.label);
-        park_storage::game_downloads::enqueue(&store.root,std::path::Path::new(&directory),item,&self.edition,&self.channel,&name,&now).map_err(|_|SourceFailure::Storage)?;
+    pub fn enqueue_download(
+        &self,
+        store: Arc<ProgressStore>,
+        directory: String,
+        title: String,
+    ) -> Result<Arc<GameLinks>> {
+        if self.direct.is_none() {
+            return Err(SourceFailure::Unsupported);
+        }
+        let now: String = store
+            .lock()
+            .map_err(|_| SourceFailure::Storage)?
+            .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')", [], |r| {
+                r.get(0)
+            })
+            .map_err(|_| SourceFailure::Storage)?;
+        let item = json!({"source":self.source,"id":self.work,"title":title,"mediaKind":"game","contentDomain":"game"});
+        let name = park_storage::game_downloads::safe_filename(&self.label);
+        park_storage::game_downloads::enqueue(
+            &store.root,
+            std::path::Path::new(&directory),
+            item,
+            &self.edition,
+            &self.channel,
+            &name,
+            &now,
+        )
+        .map_err(|_| SourceFailure::Storage)?;
         Ok(Arc::new(self.clone()))
     }
     pub fn details(&self) -> String {
@@ -286,12 +347,16 @@ impl GameLinks {
 
     /// 每次显式保存均从头传输，校验通过才把私有临时文件交给系统导出。
     pub fn download(&self, request: Arc<Request>) -> Result<Arc<GameFile>> {
-        self.transfer(request,None)
+        self.transfer(request, None)
     }
 }
 
 impl GameLinks {
-    fn transfer(&self, request:Arc<Request>,progress:Option<park_media::download::GameProgress<'_>>)->Result<Arc<GameFile>> {
+    fn transfer(
+        &self,
+        request: Arc<Request>,
+        progress: Option<park_media::download::GameProgress<'_>>,
+    ) -> Result<Arc<GameFile>> {
         let line = self.direct.as_ref().ok_or(SourceFailure::Unsupported)?;
         let session = self
             .host
@@ -327,36 +392,133 @@ impl GameFile {
 
 #[uniffi::export]
 impl ProgressStore {
-    pub fn game_downloads(&self)->std::result::Result<String,crate::StorageError>{
-        park_storage::game_downloads::list(&self.root).map(|rows|Value::Array(rows).to_string()).map_err(|_|crate::StorageError::InvalidDownload)
+    pub fn game_downloads(&self) -> std::result::Result<String, crate::StorageError> {
+        park_storage::game_downloads::list(&self.root)
+            .map(|rows| Value::Array(rows).to_string())
+            .map_err(|_| crate::StorageError::InvalidDownload)
     }
-    pub fn change_game_download(&self,identity:Vec<String>,action:String)->std::result::Result<(),crate::StorageError>{
-        let ids:[String;4]=identity.try_into().map_err(|_|crate::StorageError::InvalidDownload)?;
-        park_storage::game_downloads::change(&self.root,ids.each_ref().map(String::as_str),&action).map_err(|_|crate::StorageError::InvalidDownload)
+    pub fn change_game_download(
+        &self,
+        identity: Vec<String>,
+        action: String,
+    ) -> std::result::Result<(), crate::StorageError> {
+        let ids: [String; 4] = identity
+            .try_into()
+            .map_err(|_| crate::StorageError::InvalidDownload)?;
+        park_storage::game_downloads::change(
+            &self.root,
+            ids.each_ref().map(String::as_str),
+            &action,
+        )
+        .map_err(|_| crate::StorageError::InvalidDownload)
+    }
+}
+
+/// 一次持久化队列尝试；宿主解析失败、请求撤销或离开进程前均可释放占用。
+#[derive(Object)]
+pub struct GameTransfer {
+    store: Arc<ProgressStore>,
+    ids: [String; 4],
+    attempt: u64,
+    request: Arc<Request>,
+    finished: std::sync::Mutex<bool>,
+}
+
+#[uniffi::export]
+impl ProgressStore {
+    pub fn claim_game_download(
+        self: Arc<Self>,
+        identity: Vec<String>,
+        request: Arc<Request>,
+    ) -> Result<Arc<GameTransfer>> {
+        let ids: [String; 4] = identity
+            .try_into()
+            .map_err(|_| SourceFailure::Unsupported)?;
+        let attempt =
+            park_storage::game_downloads::claim(&self.root, ids.each_ref().map(String::as_str))
+                .map_err(|_| SourceFailure::Storage)?;
+        Ok(Arc::new(GameTransfer {
+            store: self,
+            ids,
+            attempt,
+            request,
+            finished: std::sync::Mutex::new(false),
+        }))
+    }
+}
+
+#[uniffi::export]
+impl GameTransfer {
+    pub fn save(&self, links: Arc<GameLinks>) -> Result<()> {
+        use park_storage::game_downloads as queue;
+        let mut finished = self.finished.lock().map_err(|_| SourceFailure::Storage)?;
+        let key = self.ids.each_ref().map(String::as_str);
+        if *finished
+            || key
+                != [
+                    links.source.as_str(),
+                    links.work.as_str(),
+                    links.edition.as_str(),
+                    links.channel.as_str(),
+                ]
+        {
+            return Err(SourceFailure::Unsupported);
+        }
+        let report = |bytes, total| {
+            queue::progress(&self.store.root, key, self.attempt, bytes, total)
+                .map_err(|_| park_media::Error::Storage)
+        };
+        let file = links.transfer(self.request.clone(), Some(&report))?;
+        queue::publish(
+            &self.store.root,
+            key,
+            self.attempt,
+            &file.path,
+            &links.details,
+            || self.request.cancelled.is_cancelled(),
+        )
+        .map_err(|_| SourceFailure::Storage)?;
+        *finished = true;
+        Ok(())
+    }
+}
+
+impl Drop for GameTransfer {
+    fn drop(&mut self) {
+        if !*self
+            .finished
+            .get_mut()
+            .unwrap_or_else(|error| error.into_inner())
+        {
+            let _ = park_storage::game_downloads::finish_error(
+                &self.store.root,
+                self.ids.each_ref().map(String::as_str),
+                self.attempt,
+                self.request.cancelled.is_cancelled(),
+            );
+        }
     }
 }
 
 #[uniffi::export]
 impl SourceService {
-    pub fn run_game_download(&self,store:Arc<ProgressStore>,identity:Vec<String>,resolved:Option<Arc<GameLinks>>,request:Arc<Request>)->Result<()>{
-        use park_storage::game_downloads as queue;
-        let ids:[String;4]=identity.try_into().map_err(|_|SourceFailure::Unsupported)?;
-        let key=ids.each_ref().map(String::as_str);
-        let attempt=queue::claim(&store.root,key).map_err(|_|SourceFailure::Storage)?;
-        let result=(||{
-            let links=if let Some(given)=resolved{
-                if [given.source.as_str(),given.work.as_str(),given.edition.as_str(),given.channel.as_str()]!=key{return Err(SourceFailure::Unsupported)}
-                given
-            }else{
-                let offers=self.game_offers(ids[0].clone(),ids[1].clone(),request.clone())?;
+    pub fn run_game_download(
+        &self,
+        store: Arc<ProgressStore>,
+        identity: Vec<String>,
+        resolved: Option<Arc<GameLinks>>,
+        request: Arc<Request>,
+    ) -> Result<()> {
+        let transfer = store.claim_game_download(identity, request.clone())?;
+        let links = match resolved {
+            Some(links) => links,
+            None => {
+                let [source, work, resource, channel] = &transfer.ids;
+                let menu = self.game_offers(source.clone(), work.clone(), request.clone())?;
                 // 后台重试从不授权新的原站回复。若站点重新要求确认，用户须回到资源入口。
-                offers.resolve(ids[2].clone(),ids[3].clone(),None,request.clone())?
-            };
-            let report=|bytes,total|queue::progress(&store.root,key,attempt,bytes,total).map_err(|_|park_media::Error::Storage);
-            let file=links.transfer(request.clone(),Some(&report))?;
-            queue::publish(&store.root,key,attempt,&file.path,&links.details,||request.cancelled.is_cancelled()).map_err(|_|SourceFailure::Storage)
-        })();
-        if result.is_err(){queue::finish_error(&store.root,key,attempt,request.cancelled.is_cancelled()).map_err(|_|SourceFailure::Storage)?}
-        result
+                menu.resolve(resource.clone(), channel.clone(), None, request)?
+            }
+        };
+        transfer.save(links)
     }
 }

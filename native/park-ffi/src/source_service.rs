@@ -17,7 +17,7 @@ mod tavern_resource;
 pub use tavern_resource::{SourceTavernResource, TavernOriginal};
 pub use game::OnlineGame;
 mod game_resources;
-pub use game_resources::{GameFile, GameLinks, GameOffers};
+pub use game_resources::{GameFile, GameLinks, GameOffers, GameTransfer};
 mod downloads;
 pub use downloads::DownloadBook;
 mod comic;

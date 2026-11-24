@@ -147,7 +147,7 @@ import UIKit
         }.disabled(busy)
       }
     }
-    Button(tr("关闭")) { resolved=nil;current=nil;copied=nil;openFailed=false }
+    Button(tr("完成")) { resolved=nil;current=nil;copied=nil;openFailed=false }
   }
   private func combinedFields(_ fields: ResolvedGameResource.Fields, title: String) -> String {
     var lines = [title]

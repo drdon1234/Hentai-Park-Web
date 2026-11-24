@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-domains, mac-shelf, mac-setup, migration, download-actions, discovery-scope, full-history, download-entry, shelf-display, detail-sections, host-actions, host-tags, host-directory, host-metadata, host-update-route, host-update-management, host-chapter-actions, host-dictionaries, host-record-recovery, host-comments, host-comment-link, host-favorites, host-preview, host-preview-mac, host-tag-pages-mac, host-favorite-windows, storage, domain-recheck]
+        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-domains, mac-shelf, mac-setup, migration, download-actions, discovery-scope, full-history, download-entry, shelf-display, detail-sections, host-actions, host-tags, host-directory, host-metadata, host-update-route, host-update-management, host-chapter-actions, host-dictionaries, host-record-recovery, host-download-media, host-comments, host-comment-link, host-favorites, host-preview, host-preview-mac, host-tag-pages-mac, host-favorite-windows, storage, domain-recheck]
         default: full
 permissions:
   contents: read
@@ -157,7 +157,7 @@ jobs:
       matrix:
         include: >-
           ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record","mac-domains","mac-shelf","mac-setup","host-preview-mac","host-tag-pages-mac","host-favorite-windows"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
-          || contains(fromJSON('["media","download-actions","discovery-scope","migration","full-history","download-entry","shelf-display","detail-sections","host-actions","host-tags","host-directory","host-metadata","host-update-route","host-update-management","host-chapter-actions","host-dictionaries","host-record-recovery","host-comments","host-comment-link","host-favorites","host-preview","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
+          || contains(fromJSON('["media","download-actions","discovery-scope","migration","full-history","download-entry","shelf-display","detail-sections","host-actions","host-tags","host-directory","host-metadata","host-update-route","host-update-management","host-chapter-actions","host-dictionaries","host-record-recovery","host-download-media","host-comments","host-comment-link","host-favorites","host-preview","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'audio' && '[{"host":"iPhone","runtime":"18.6"}]'
           || inputs.scope == 'domain-recheck' && '[{"host":"iPhone","runtime":"18.6"}]'
           || contains(fromJSON('["movie","domains","reading","pictures","tavern","setup","shelf","collection","game"]'), inputs.scope) && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
@@ -201,12 +201,13 @@ jobs:
                                      "4f1ba6fa87736f5d3f04f6b2b69ad6016713d5acaec1e6795060908f1eae2c03" if os.environ["EXERCISE_SCOPE"] == "host-tags" else
                                      "fa50f9d3dfb7a9dafbda5c01781e87b72b0e528cc9ea2537266b595ad8a7ab97" if os.environ["EXERCISE_SCOPE"] == "host-directory" else
                                      "c615d249a495dcb8bae86f840a876d91cdaadfd111ac7104e7c2c711160aec05" if os.environ["EXERCISE_SCOPE"] == "host-update-route" else
-                                     "9f8bbc07e6fad43c8838a3ecfed40df1cd1052aa80304c34a737bc26c9a4f875" if os.environ["EXERCISE_SCOPE"] == "host-update-management" else
+                                     "f4d33ef662d41f340f279e0602c342c924e281db963036efd0298c0f57cc10b9" if os.environ["EXERCISE_SCOPE"] == "host-update-management" else
                                      "7bc9df4b9cddc87290bea20978e9e8b1cf1c28a5267d8809e57728e19533f5ec" if os.environ["EXERCISE_SCOPE"] == "host-chapter-actions" else
                                      "dfe2f59775245bc057c8d9e86daea98899f2e0353596c58e6db557c8dc90d3aa" if os.environ["EXERCISE_SCOPE"] == "host-comment-link" else
-                                     "ed70bd425bb512f41948b219f73bfade4a8f0b1ee01cb62321953cb8b9630ad9" if os.environ["EXERCISE_SCOPE"] == "host-comments" else
-                                     "49c4d98bb9e90648ab1626c0fe05fec4116cfce2122177d9a08ebb7e35713de3" if os.environ["EXERCISE_SCOPE"] == "host-record-recovery" else
-                                     "f830ac3444e9d6346a1be7ce0f2661ad2df96eeb33e6300af45f98db0c8f7a8d" if os.environ["EXERCISE_SCOPE"] == "host-dictionaries" else
+                                     "2ab7f6722fda507cb0a63d3d3b4318022bf256d84985c7323234c9845660de08" if os.environ["EXERCISE_SCOPE"] == "host-comments" else
+                                     "397b722c771cf7ba979c945a8ae492572423f7a7adf33ccb86b7cc99bb162af4" if os.environ["EXERCISE_SCOPE"] == "host-record-recovery" else
+                                     "a8fd4c4acefb412c210dc4c32a4c70605845a0b7f37159c720d2b5150ad435a7" if os.environ["EXERCISE_SCOPE"] == "host-download-media" else
+                                     "5562d0c243f89ed2de82280e81db96c1d9a81c6e125f2f101696f6d245116091" if os.environ["EXERCISE_SCOPE"] == "host-dictionaries" else
                                      "70b3b3473947450a96a533fbf7ff621ca2152cd56f31784fe865fa21a0040b00" if os.environ["EXERCISE_SCOPE"] == "host-favorites" else
                                      "5eefb4f4470a4af95acad553b145bb43a8e9384bfd6e2df3cc23f1e043694a72" if os.environ["EXERCISE_SCOPE"] == "host-metadata" else
                                      "d6308468e3dbe604f9c0d9cfcf94ea375619cd0a9a968aae9e5023a89dec4d61" if os.environ["EXERCISE_SCOPE"] == "host-actions" else

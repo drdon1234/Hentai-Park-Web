@@ -427,6 +427,7 @@ private final class LibraryModel: ObservableObject {
     }
     @State private var destination: Destination?
     @State private var expandedDownloads = Set<LibraryWorkID>()
+    @State private var showingComicExports = false
     private let labels = librarySections
     private let symbols = ["safari", "heart", "arrow.down.circle", "person.crop.circle"]
     @Environment(\.sizeCategory) private var textSize
@@ -467,6 +468,11 @@ private final class LibraryModel: ObservableObject {
             } else { compact }
         }
         .environmentObject(siteDisplayOrder)
+        .sheet(isPresented: $showingComicExports) {
+            if let session = model.session {
+                ComicExportShelf(jobs: downloads.exports, session: session, tr: access.tr)
+            }
+        }
         .task(id: retry) {
             await model.refresh()
             if let session = model.session { await shelf.refresh(session) }
@@ -567,7 +573,7 @@ private final class LibraryModel: ObservableObject {
                     if let session = model.session {
                         DownloadControls(selection: downloadSelection, works: filtered,
                                          untypedSources: Set(rows.filter { $0.downloaded && !$0.invalidDownload && $0.itemKind == nil }.map(\.source)),
-                                         session: session, tr: access.tr)
+                                         session: session, tr: access.tr, showExports: { showingComicExports = true })
                         ForEach(damaged, id: \.libraryID) { work in
                             InvalidDownloadRow(work: work, session: session, tr: access.tr)
                         }

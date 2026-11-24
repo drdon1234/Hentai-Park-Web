@@ -242,7 +242,7 @@ import SwiftUI
   @State private var failed = false
   @State private var catalogFailed = false
   @State private var catalogRetry = 0
-  @State private var showExports = false
+  let showExports: () -> Void
 
   var body: some View {
     Section {
@@ -267,7 +267,7 @@ import SwiftUI
         Button(tr("取消")) { selection.finish(); failed = false }
       } else {
         Button(tr("批量选择")) { selection.selecting = true }.disabled(works.isEmpty)
-        Button(tr("导出文件")) { showExports = true }
+        Button(tr("导出文件"), action: showExports)
       }
       if failed { Text(tr("删除失败，请重试")) }
       if catalogFailed {
@@ -275,7 +275,6 @@ import SwiftUI
         Button(tr("重试")) { catalogRetry += 1 }
       }
     }
-    .sheet(isPresented: $showExports) { ComicExportShelf(jobs: queue.exports, session: session, tr: tr) }
     .task(id: CatalogRequest(sources: selection.kind == nil ? [] : untypedSources, retry: catalogRetry)) {
       catalogFailed = false
       guard selection.kind != nil, !untypedSources.isEmpty else { return }
@@ -416,7 +415,7 @@ import SwiftUI
   }
 }
 
-@MainActor private struct ComicExportShelf: View {
+@MainActor struct ComicExportShelf: View {
   @ObservedObject var jobs: ComicExportJobs
   let session: ProgressSession
   let tr: (String) -> String
@@ -454,7 +453,11 @@ import SwiftUI
           }
         }
       }.buttonStyle(.borderless)
-    }.task(id: jobs.revision + retry) {
+    }
+    #if os(macOS)
+    .frame(minWidth: 420, idealWidth: 500, minHeight: 320, idealHeight: 420)
+    #endif
+    .task(id: jobs.revision + retry) {
       do { files = try await session.exportedComics(); failed = false }
       catch { if !Task.isCancelled { failed = true } }
     }

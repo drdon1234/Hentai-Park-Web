@@ -215,7 +215,6 @@ import UIKit
   @State private var busy=false
   @State private var failed=false
   @State private var copied=false
-  @State private var exporting=false
   var body: some View {
     VStack(alignment:.leading,spacing:6) {
       Text(row.item.title ?? row.item.id).font(.headline)
@@ -228,10 +227,7 @@ import UIKit
       else {
         if row.status=="done", let file=row.file {
           Button(tr(copied ? "已复制" : "复制文件路径")) { copyGameField(file);copied=true }
-          Button(tr("导出游戏文件")) { export(URL(fileURLWithPath:file)) }
-          #if os(iOS)
-            .sheet(isPresented:$exporting) { GameExportPicker(url:URL(fileURLWithPath:file)) }
-          #endif
+          SavedFileExportButton(url: URL(fileURLWithPath: file), filename: row.filename, label: tr("导出游戏文件"), tr: tr)
         } else { Button(tr("重新下载")) { change("resume") } }
         Button(tr("移除任务（保留文件）")) { change("remove") }
       }
@@ -245,11 +241,28 @@ import UIKit
       do { try await queue.changeGame(row,action:action,fallback:session);failed=false } catch { failed=true }
     }
   }
+}
+
+@MainActor struct SavedFileExportButton: View {
+  let url: URL
+  let filename: String
+  let label: String
+  let tr: (String) -> String
+  @State private var busy = false
+  @State private var failed = false
+  @State private var exporting = false
+  var body: some View {
+    Button(label) { export(url) }.disabled(busy)
+      #if os(iOS)
+      .sheet(isPresented: $exporting) { GameExportPicker(url: url) }
+      #endif
+    if failed { Text(tr("操作失败，请重试")) }
+  }
   private func export(_ url:URL) {
     #if os(macOS)
     guard let window=NSApp.keyWindow else {failed=true;return}
     let panel=NSSavePanel()
-    panel.nameFieldStringValue=row.filename
+    panel.nameFieldStringValue=filename
     panel.beginSheetModal(for:window) { response in
       guard response == .OK, let destination=panel.url else { return }
       busy=true

@@ -6,6 +6,7 @@ import SwiftUI
 #endif
 
 @MainActor final class DownloadQueue: ObservableObject {
+  let exports = ComicExportJobs()
   let recordings = BroadcastRecorder()
   @Published private(set) var revision = 0
   @Published private(set) var failed = false
@@ -241,6 +242,7 @@ import SwiftUI
   @State private var failed = false
   @State private var catalogFailed = false
   @State private var catalogRetry = 0
+  @State private var showExports = false
 
   var body: some View {
     Section {
@@ -265,6 +267,7 @@ import SwiftUI
         Button(tr("取消")) { selection.finish(); failed = false }
       } else {
         Button(tr("批量选择")) { selection.selecting = true }.disabled(works.isEmpty)
+        Button(tr("导出文件")) { showExports = true }
       }
       if failed { Text(tr("删除失败，请重试")) }
       if catalogFailed {
@@ -272,6 +275,7 @@ import SwiftUI
         Button(tr("重试")) { catalogRetry += 1 }
       }
     }
+    .sheet(isPresented: $showExports) { ComicExportShelf(jobs: queue.exports, session: session, tr: tr) }
     .task(id: CatalogRequest(sources: selection.kind == nil ? [] : untypedSources, retry: catalogRetry)) {
       catalogFailed = false
       guard selection.kind != nil, !untypedSources.isEmpty else { return }
@@ -303,5 +307,156 @@ import SwiftUI
   private struct CatalogRequest: Equatable {
     let sources: Set<String>
     let retry: Int
+  }
+}
+
+@MainActor final class ComicExportJobs: ObservableObject {
+  struct Job: Identifiable {
+    enum State { case running, done(Int), failed }
+    let id = UUID()
+    let work: LibraryWorkID
+    let title: String
+    let pdf: Bool
+    var state: State = .running
+  }
+  @Published private(set) var jobs: [Job] = []
+  @Published private(set) var revision = 0
+
+  func running(_ work: LibraryWorkID, pdf: Bool) -> Bool {
+    jobs.contains { job in
+      guard job.work == work && job.pdf == pdf else { return false }
+      if case .running = job.state { return true }
+      return false
+    }
+  }
+
+  func start(_ work: LibraryWork, pdfPages: Int32?) {
+    let pdf = pdfPages != nil
+    guard !running(work.libraryID, pdf: pdf) else { return }
+    let job = Job(work: work.libraryID, title: work.title, pdf: pdf)
+    jobs.insert(job, at: 0)
+    let operation = Task {
+      // 用户离开详情或关闭本窗口后，由独立会话完成已经接受的文件导出。
+      let session = try await ProgressSession.openApplicationLibrary()
+      do {
+        let files = try await session.exportComic(work, pdfPages: pdfPages)
+        await session.close()
+        return files.count
+      } catch {
+        await session.close()
+        throw error
+      }
+    }
+    #if os(iOS)
+    let allowance = UIApplication.shared.beginBackgroundTask(withName: "Comic export") { operation.cancel() }
+    #endif
+    Task {
+      #if os(iOS)
+      defer { if allowance != .invalid { UIApplication.shared.endBackgroundTask(allowance) } }
+      #endif
+      let result = await operation.result
+      guard let index = jobs.firstIndex(where: { $0.id == job.id }) else { return }
+      switch result {
+      case .success(let count): jobs[index].state = .done(count)
+      case .failure: jobs[index].state = .failed
+      }
+      revision += 1
+    }
+  }
+
+  func dismiss(_ id: UUID) {
+    jobs.removeAll { job in
+      if case .running = job.state { return false }
+      return job.id == id
+    }
+  }
+}
+
+@MainActor struct ComicExportActions: View {
+  @ObservedObject var jobs: ComicExportJobs
+  let work: LibraryWork
+  let session: ProgressSession
+  let tr: (String) -> String
+  @State private var choosing = false
+  @State private var limit: Int32 = 300
+  @State private var failed = false
+  private let choices: [Int32] = [100,300,1000,0]
+
+  var body: some View {
+    Menu(tr("导出")) {
+      Button(tr("导出为 CBZ")) { jobs.start(work, pdfPages: nil) }.disabled(jobs.running(work.libraryID, pdf: false))
+      Button(tr("导出为 PDF")) {
+        Task {
+          do {
+            let saved = try await session.comicPdfLimit()
+            limit = choices.contains(saved) ? saved : 300
+            failed = false
+            choosing = true
+          } catch { failed = true }
+        }
+      }.disabled(jobs.running(work.libraryID, pdf: true))
+    }
+    .sheet(isPresented: $choosing) {
+      VStack(alignment: .leading, spacing: 16) {
+        Text(tr("导出 PDF")).font(.headline)
+        Picker(tr("每个文件最多页数"), selection: $limit) {
+          ForEach(choices, id: \.self) { value in
+            Text(value == 0 ? tr("不限") : tr("{value0} 页").replacingOccurrences(of: "{value0}", with: String(value))).tag(value)
+          }
+        }
+        Text(tr("超过页数或单个文件过大时自动分成多个文件；导出在后台进行。"))
+        HStack {
+          Button(tr("取消"), role: .cancel) { choosing = false }
+          Button(tr("导出")) { choosing = false; jobs.start(work, pdfPages: limit) }
+        }
+      }.padding()
+    }
+    if jobs.running(work.libraryID, pdf: false) || jobs.running(work.libraryID, pdf: true) { ProgressView(tr("正在导出…")) }
+    if failed { Text(tr("加载失败")) }
+  }
+}
+
+@MainActor private struct ComicExportShelf: View {
+  @ObservedObject var jobs: ComicExportJobs
+  let session: ProgressSession
+  let tr: (String) -> String
+  @Environment(\.dismiss) private var dismiss
+  @State private var files: [URL] = []
+  @State private var retry = 0
+  @State private var failed = false
+  var body: some View {
+    VStack(alignment: .leading) {
+      HStack { Text(tr("导出文件")).font(.headline); Spacer(); Button(tr("完成")) { dismiss() } }.padding()
+      List {
+        if !jobs.jobs.isEmpty {
+          Section(header: Text(tr("导出任务"))) {
+            ForEach(jobs.jobs) { job in
+              VStack(alignment: .leading) {
+                Text(job.title + (job.pdf ? " · PDF" : " · CBZ"))
+                switch job.state {
+                case .running: ProgressView(tr("正在导出…"))
+                case .failed:
+                  Text(tr("导出失败，请重试"))
+                  Button(tr("移除记录")) { jobs.dismiss(job.id) }
+                case .done(let count):
+                  Text(tr("已导出 {value0} 个文件").replacingOccurrences(of: "{value0}", with: String(count)))
+                  Button(tr("移除记录")) { jobs.dismiss(job.id) }
+                }
+              }
+            }
+          }
+        }
+        Section(header: Text(tr("已导出"))) {
+          if failed { Text(tr("加载失败")); Button(tr("重试")) { retry += 1 } }
+          else if files.isEmpty && jobs.jobs.isEmpty { Text(tr("还没有导出文件")) }
+          ForEach(files, id: \.self) { file in
+            SavedFileExportButton(url: file, filename: file.lastPathComponent, label: file.lastPathComponent, tr: tr)
+          }
+        }
+      }.buttonStyle(.borderless)
+    }.task(id: jobs.revision + retry) {
+      do { files = try await session.exportedComics(); failed = false }
+      catch { if !Task.isCancelled { failed = true } }
+    }
   }
 }

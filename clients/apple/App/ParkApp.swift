@@ -639,6 +639,9 @@ private final class LibraryModel: ObservableObject {
                                             Button(chapter.title) { open(work, chapter.id) }
                                                 .buttonStyle(.borderless)
                                         }
+                                        if index == 2, work.media == "comic", let session = model.session {
+                                            ComicExportActions(jobs: downloads.exports, work: work, session: session, tr: access.tr)
+                                        }
                                     }
                                 } else if index != 2 {
                                     Button(work.title) { destination = .work(work) }

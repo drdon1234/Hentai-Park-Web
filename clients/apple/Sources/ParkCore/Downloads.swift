@@ -7,6 +7,8 @@ private struct DownloadPreferences: Decodable, Sendable {
   let downloadTaskConcurrency: Int?
   let downloadConcurrency: Int?
   let downloadDirectory: String?
+  let pdfPagesPerFile: Int32?
+  let language: String?
 
   func limit(_ value: Int?, default fallback: Int) -> UInt32 {
     UInt32(max(1, min(8, value ?? fallback)))
@@ -23,6 +25,42 @@ public extension LibraryWork {
 }
 
 extension ProgressSession {
+  public func comicPdfLimit() async throws -> Int32 {
+    try await preferences(DownloadPreferences.self).pdfPagesPerFile ?? 300
+  }
+
+  public func exportComic(_ work: LibraryWork, pdfPages: Int32?) async throws -> [URL] {
+    let settings = try await preferences(DownloadPreferences.self)
+    guard work.downloaded, !work.invalidDownload, work.media == "comic", !work.chapters.isEmpty else {
+      throw SiteReadError.malformed
+    }
+    let output = try downloadDirectory(configured: settings.downloadDirectory).appendingPathComponent("exports", isDirectory: true)
+    let cache = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+    let locale = settings.language.flatMap { $0.isEmpty ? nil : $0 } ?? Locale.preferredLanguages.first ?? "en"
+    return try await run { store, request in
+      if let pages = pdfPages {
+        guard (0...5000).contains(pages) else { throw SiteReadError.malformed }
+        try store.savePreference(name: "pdfPagesPerFile", json: String(pages))
+      }
+      return try store.exportComic(source: work.source, workId: work.workId, format: pdfPages == nil ? .cbz : .pdf,
+        maxPages: pdfPages ?? 0, directory: output.path, cacheDirectory: cache.path, locale: locale,
+        request: request).map { output.appendingPathComponent($0) }
+    }
+  }
+
+  public func exportedComics() async throws -> [URL] {
+    let settings = try await preferences(DownloadPreferences.self)
+    let output = try downloadDirectory(configured: settings.downloadDirectory).appendingPathComponent("exports", isDirectory: true)
+    let files = FileManager.default
+    guard files.fileExists(atPath: output.path) else { return [] }
+    let entries = try files.contentsOfDirectory(at: output, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey], options: .skipsHiddenFiles)
+    return try entries.compactMap { url -> (URL, Date)? in
+      let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey])
+      guard values.isRegularFile == true, values.isSymbolicLink != true else { return nil }
+      return (url, values.contentModificationDate ?? .distantPast)
+    }.sorted { $0.1 > $1.1 }.map(\.0)
+  }
+
   func downloadDirectory(configured: String?) throws -> URL {
     let owned = directory.appendingPathComponent("downloads", isDirectory: true)
     #if os(iOS)

@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-domains, mac-shelf, mac-setup, migration, download-actions, discovery-scope, full-history, download-entry, shelf-display, detail-sections, host-actions, host-tags, host-directory, host-metadata, host-update-route, host-update-management, host-chapter-actions, host-dictionaries, host-comments, host-comment-link, host-favorites, host-preview, host-preview-mac, host-tag-pages-mac, host-favorite-windows, storage, domain-recheck]
+        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-domains, mac-shelf, mac-setup, migration, download-actions, discovery-scope, full-history, download-entry, shelf-display, detail-sections, host-actions, host-tags, host-directory, host-metadata, host-update-route, host-update-management, host-chapter-actions, host-dictionaries, host-record-recovery, host-comments, host-comment-link, host-favorites, host-preview, host-preview-mac, host-tag-pages-mac, host-favorite-windows, storage, domain-recheck]
         default: full
 permissions:
   contents: read
@@ -157,7 +157,7 @@ jobs:
       matrix:
         include: >-
           ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record","mac-domains","mac-shelf","mac-setup","host-preview-mac","host-tag-pages-mac","host-favorite-windows"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
-          || contains(fromJSON('["media","download-actions","discovery-scope","migration","full-history","download-entry","shelf-display","detail-sections","host-actions","host-tags","host-directory","host-metadata","host-update-route","host-update-management","host-chapter-actions","host-dictionaries","host-comments","host-comment-link","host-favorites","host-preview","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
+          || contains(fromJSON('["media","download-actions","discovery-scope","migration","full-history","download-entry","shelf-display","detail-sections","host-actions","host-tags","host-directory","host-metadata","host-update-route","host-update-management","host-chapter-actions","host-dictionaries","host-record-recovery","host-comments","host-comment-link","host-favorites","host-preview","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'audio' && '[{"host":"iPhone","runtime":"18.6"}]'
           || inputs.scope == 'domain-recheck' && '[{"host":"iPhone","runtime":"18.6"}]'
           || contains(fromJSON('["movie","domains","reading","pictures","tavern","setup","shelf","collection","game"]'), inputs.scope) && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
@@ -205,6 +205,7 @@ jobs:
                                      "7bc9df4b9cddc87290bea20978e9e8b1cf1c28a5267d8809e57728e19533f5ec" if os.environ["EXERCISE_SCOPE"] == "host-chapter-actions" else
                                      "dfe2f59775245bc057c8d9e86daea98899f2e0353596c58e6db557c8dc90d3aa" if os.environ["EXERCISE_SCOPE"] == "host-comment-link" else
                                      "ed70bd425bb512f41948b219f73bfade4a8f0b1ee01cb62321953cb8b9630ad9" if os.environ["EXERCISE_SCOPE"] == "host-comments" else
+                                     "49c4d98bb9e90648ab1626c0fe05fec4116cfce2122177d9a08ebb7e35713de3" if os.environ["EXERCISE_SCOPE"] == "host-record-recovery" else
                                      "f830ac3444e9d6346a1be7ce0f2661ad2df96eeb33e6300af45f98db0c8f7a8d" if os.environ["EXERCISE_SCOPE"] == "host-dictionaries" else
                                      "70b3b3473947450a96a533fbf7ff621ca2152cd56f31784fe865fa21a0040b00" if os.environ["EXERCISE_SCOPE"] == "host-favorites" else
                                      "5eefb4f4470a4af95acad553b145bb43a8e9384bfd6e2df3cc23f1e043694a72" if os.environ["EXERCISE_SCOPE"] == "host-metadata" else

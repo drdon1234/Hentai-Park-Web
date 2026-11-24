@@ -53,6 +53,7 @@ private extension View {
                                 Button(tr("删除"), role: .destructive) { target = row; deleting = true }
                             } label: { Image(systemName: "ellipsis.circle") }
                             .accessibilityLabel(tr("更多") + " · " + row.name)
+                            .accessibilityIdentifier("category-menu-\(row.id)-\(row.name)")
                         }
                     }
                 }

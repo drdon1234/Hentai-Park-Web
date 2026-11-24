@@ -92,7 +92,7 @@ impl SourceCatalog {
             writers: Mutex::default(),
         }
     }
-    pub fn installed(&self) -> Result<Vec<Installed>, Error> {
+    fn registered(&self) -> Result<Vec<Installed>, Error> {
         let raw = match fs::read(self.root.join("sources.json")) {
             Ok(v) => v,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -102,9 +102,25 @@ impl SourceCatalog {
         if entries.sources.iter().any(|s| !crate::source_key(&s.key)) {
             return Err(Error::Config);
         }
-        entries.sources.retain(|s| s.enabled != Some(false));
         entries.sources.sort_by_key(|s| s.order);
         Ok(entries.sources)
+    }
+    pub fn installed(&self) -> Result<Vec<Installed>, Error> {
+        let mut entries = self.registered()?;
+        entries.retain(|s| s.enabled != Some(false));
+        Ok(entries)
+    }
+    pub fn library_source_kinds(&self, keys: &[String], call: Invocation) -> Result<HashMap<String, String>, Error> {
+        let _gate = self.lock(false, &call)?;
+        let wanted: std::collections::HashSet<_> = keys.iter().collect();
+        let mut kinds = HashMap::new();
+        for entry in self.registered()?.into_iter().filter(|entry| wanted.contains(&entry.key)) {
+            let manifest = installed_manifest(&self.root, &entry.key, &entry.sha256, &self.polyfills, call.clone())?;
+            if let Some(kind) = manifest["type"].as_str() {
+                kinds.insert(entry.key, kind.to_owned());
+            }
+        }
+        Ok(kinds)
     }
     pub fn manifest(&self,key:&str,call:Invocation)->Result<Value,Error>{
         let _gate=self.lock(false,&call)?;

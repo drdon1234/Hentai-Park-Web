@@ -494,6 +494,14 @@ extension ProgressSession {
     try await installedSites(library).filter(\.isBrowsableSite)
   }
 
+  public func librarySourceKinds(_ library: SourceLibrary, sources: Set<String>) async throws -> [String: String] {
+    let root = directory
+    return try await run { _, request in
+      let service = try library.service(directory: root, request: request)
+      return try service.librarySourceKinds(keys: sources.sorted(), request: request)
+    }
+  }
+
   public struct ManagedSite: Identifiable, Sendable {
     public let id: String
     public let name: String

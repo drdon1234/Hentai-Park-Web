@@ -147,15 +147,15 @@ import SwiftUI
   func rows(_ works: [LibraryWork]) -> [LibraryWork] {
     works.filter { work in
       work.downloaded && !work.invalidDownload && (status == nil || work.downloadStatus == status)
-        && (kind == nil || kind == (work.itemKind ?? siteKinds[work.source] ?? "comic"))
+        && (kind == nil || kind == (work.itemKind ?? siteKinds[work.source]))
     }
   }
 
-  func loadSiteKinds(_ session: ProgressSession) async throws {
+  func loadSiteKinds(_ session: ProgressSession, sources: Set<String>) async throws {
     guard let library = InstalledSources.library else { return }
-    let sites = try await session.sites(library)
+    let kinds = try await session.librarySourceKinds(library, sources: sources)
     try Task.checkCancellation()
-    siteKinds = sites.reduce(into: [:]) { $0[$1.key] = $1.mediaType }
+    siteKinds = sources.reduce(into: [:]) { $0[$1] = kinds[$1] ?? "comic" }
   }
 
   func finish() {
@@ -250,7 +250,7 @@ import SwiftUI
     .task(id: CatalogRequest(sources: selection.kind == nil ? [] : untypedSources, retry: catalogRetry)) {
       catalogFailed = false
       guard selection.kind != nil, !untypedSources.isEmpty else { return }
-      do { try await selection.loadSiteKinds(session) }
+      do { try await selection.loadSiteKinds(session, sources: untypedSources) }
       catch { if !Task.isCancelled { catalogFailed = true } }
     }
     .disabled(busy)

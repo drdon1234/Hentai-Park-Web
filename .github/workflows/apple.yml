@@ -207,7 +207,7 @@ jobs:
                                      "fef9eade6dd41ab0c37898fa23585aefa28b3f9fcd7e21af389e405835ad9d6d" if os.environ["EXERCISE_SCOPE"] == "host-comments" else
                                      "397b722c771cf7ba979c945a8ae492572423f7a7adf33ccb86b7cc99bb162af4" if os.environ["EXERCISE_SCOPE"] == "host-record-recovery" else
                                      "4e0d82eced331e1903a5ffc1b78913d6cdc22af9892508bb647df4667f6bba6c" if os.environ["EXERCISE_SCOPE"] == "host-download-media" else
-                                     "db4415c037515692ad46d503274a9d3a017b4de60b78aba454acb31f946320c8" if os.environ["EXERCISE_SCOPE"] == "host-game-resources" else
+                                     "889df1010ae0f98dcdf4a7bcaa4a1ed7d2928a6083482267b026067f61952c99" if os.environ["EXERCISE_SCOPE"] == "host-game-resources" else
                                      "5562d0c243f89ed2de82280e81db96c1d9a81c6e125f2f101696f6d245116091" if os.environ["EXERCISE_SCOPE"] == "host-dictionaries" else
                                      "70b3b3473947450a96a533fbf7ff621ca2152cd56f31784fe865fa21a0040b00" if os.environ["EXERCISE_SCOPE"] == "host-favorites" else
                                      "5eefb4f4470a4af95acad553b145bb43a8e9384bfd6e2df3cc23f1e043694a72" if os.environ["EXERCISE_SCOPE"] == "host-metadata" else

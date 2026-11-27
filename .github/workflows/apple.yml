@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-domains, mac-shelf, mac-setup, migration, download-actions, discovery-scope, full-history, download-entry, shelf-display, detail-sections, host-actions, host-tags, host-directory, host-metadata, host-update-route, host-update-management, host-chapter-actions, host-dictionaries, host-record-recovery, host-download-media, host-game-resources, host-comic-export, host-categories, host-feed-pages, host-comments, host-comment-link, host-favorites, host-preview, host-preview-mac, host-categories-mac, host-tag-pages-mac, host-favorite-windows, storage, domain-recheck]
+        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-domains, mac-shelf, mac-setup, migration, download-actions, discovery-scope, full-history, download-entry, shelf-display, detail-sections, host-actions, host-tags, host-directory, host-metadata, host-update-route, host-update-management, host-chapter-actions, host-dictionaries, host-record-recovery, host-download-media, host-game-resources, host-comic-export, host-categories, host-categories-empty, host-feed-pages, host-comments, host-comment-link, host-favorites, host-preview, host-preview-mac, host-categories-mac, host-tag-pages-mac, host-favorite-windows, storage, domain-recheck]
         default: full
 permissions:
   contents: read
@@ -157,7 +157,7 @@ jobs:
       matrix:
         include: >-
           ${{ fromJSON(contains(fromJSON('["queue","privacy","layout","capture","review","write","record","mac-domains","mac-shelf","mac-setup","host-preview-mac","host-categories-mac","host-tag-pages-mac","host-favorite-windows"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"}]'
-          || contains(fromJSON('["media","download-actions","discovery-scope","migration","full-history","download-entry","shelf-display","detail-sections","host-actions","host-tags","host-directory","host-metadata","host-update-route","host-update-management","host-chapter-actions","host-dictionaries","host-record-recovery","host-download-media","host-game-resources","host-comic-export","host-categories","host-feed-pages","host-comments","host-comment-link","host-favorites","host-preview","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
+          || contains(fromJSON('["media","download-actions","discovery-scope","migration","full-history","download-entry","shelf-display","detail-sections","host-actions","host-tags","host-directory","host-metadata","host-update-route","host-update-management","host-chapter-actions","host-dictionaries","host-record-recovery","host-download-media","host-game-resources","host-comic-export","host-categories","host-categories-empty","host-feed-pages","host-comments","host-comment-link","host-favorites","host-preview","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'audio' && '[{"host":"iPhone","runtime":"18.6"}]'
           || inputs.scope == 'domain-recheck' && '[{"host":"iPhone","runtime":"18.6"}]'
           || contains(fromJSON('["movie","domains","reading","pictures","tavern","setup","shelf","collection","game"]'), inputs.scope) && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
@@ -209,6 +209,7 @@ jobs:
                                      "4e0d82eced331e1903a5ffc1b78913d6cdc22af9892508bb647df4667f6bba6c" if os.environ["EXERCISE_SCOPE"] == "host-download-media" else
                                      "78d2e20ac0a660cb7b5cef60b59812ded3dfdf32fbb5d3bef0a28a91af808244" if os.environ["EXERCISE_SCOPE"] == "host-comic-export" else
                                      "f6a2773858d80a91753a8bb8bee64cd3c923cb76706b0071be3e6811e6f8ad0a" if os.environ["EXERCISE_SCOPE"] == "host-categories" else
+                                     "852fb351e1e922a76679add6079380f5f8562effc7033c6c1f94d2f058215b4a" if os.environ["EXERCISE_SCOPE"] == "host-categories-empty" else
                                      "8c004528188e00a22d948f2808cb3b3b837d1aa19b6b9c59523dac35fffa055c" if os.environ["EXERCISE_SCOPE"] == "host-categories-mac" else
                                      "4c4fae4dbd36cd43a0363b884a7824b23f6a8080e4146c0b26142d43564640f3" if os.environ["EXERCISE_SCOPE"] == "host-feed-pages" else
                                      "889df1010ae0f98dcdf4a7bcaa4a1ed7d2928a6083482267b026067f61952c99" if os.environ["EXERCISE_SCOPE"] == "host-game-resources" else

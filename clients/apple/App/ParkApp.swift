@@ -1070,7 +1070,7 @@ private enum LibraryDestination {
     #if os(iOS)
     private func readerShortcut(_ key: KeyEquivalent, _ delta: Int32) -> some View {
         Button(tr(delta > 0 ? "下一页" : "上一页")) { advance(delta) }
-            .keyboardShortcut(key, modifiers: [], localization: .fixed)
+            .keyboardShortcut(key, modifiers: [], localization: .withoutMirroring)
             .disabled(!canAdvance(delta))
             .frame(width: 0, height: 0).clipped().accessibilityHidden(true).allowsHitTesting(false)
     }

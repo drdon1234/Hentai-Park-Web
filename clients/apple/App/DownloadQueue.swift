@@ -17,6 +17,7 @@ import UniformTypeIdentifiers
   private var foreground = true
   private var requested = false
   private var worker: Task<Void, Never>?
+  private var queueChanges: AsyncStream<Void>.Continuation?
   private var session: ProgressSession?
   private var gameGrants: [[String]: GameLinks] = [:]
   #if os(iOS)
@@ -78,7 +79,13 @@ import UniformTypeIdentifiers
 
   func refresh() {
     requested = true
+    queueChanges?.yield(())
     startIfNeeded()
+  }
+
+  private func changesWhileDownloading() -> AsyncStream<Void> {
+    queueChanges?.finish()
+    return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { queueChanges = $0 }
   }
 
   func importComic(_ url: URL, chapterTitle: String, fallback: ProgressSession) async throws {
@@ -152,11 +159,13 @@ import UniformTypeIdentifiers
         session = opened
         try await opened.processDownloads(library, wifi: wifi, gameGrant: { key in
           await self.takeGameGrant(key)
-        }) {
+        }, observeQueue: { await self.changesWhileDownloading() }) {
           await self.downloadChanged()
         }
       } catch { if !Task.isCancelled { failed = true } }
       await session?.close()
+      queueChanges?.finish()
+      queueChanges = nil
       session = nil
       worker = nil
       #if os(iOS)

@@ -232,6 +232,7 @@ extension ProgressSession {
   /// 一次唤醒持续到队列清空。下载文件、断点及跨窗口并发额度均由核心管理。
   public func processDownloads(
     _ library: SourceLibrary, wifi: Bool, gameGrant: @escaping @Sendable ([String]) async -> GameLinks? = { _ in nil },
+    observeQueue: (@Sendable () async -> AsyncStream<Void>)? = nil,
     changed: @escaping @Sendable () async -> Void
   ) async throws {
     let settings = try await preferences(DownloadPreferences.self)
@@ -241,13 +242,17 @@ extension ProgressSession {
     let pages = settings.limit(settings.downloadConcurrency, default: 3)
     var failed = Set<LibraryWorkID>()
     var failedGames = Set<[String]>()
-    while true {
-      try Task.checkCancellation()
-      let pending = try await libraryWorks().compactMap { work -> LibraryWorkID? in
+    func pendingWorks() async throws -> [LibraryWorkID] {
+      try await libraryWorks().compactMap { work -> LibraryWorkID? in
         guard !work.invalidDownload, work.pendingDeletion == nil,
           work.downloadStatus == 0 || work.downloadStatus == 1 else { return nil }
         return work.libraryID
       }
+    }
+    while true {
+      try Task.checkCancellation()
+      let changes = await observeQueue?()
+      let pending = try await pendingWorks()
       let ready = pending.filter { !failed.contains($0) }
       let games: [GameDownloadRecord]
       do { games = try await gameDownloads().filter { $0.status == "queued" && !failedGames.contains($0.key) } }
@@ -269,29 +274,53 @@ extension ProgressSession {
       }
       // 先轮询一次所有作品，让另一站点可以利用空闲的站点额度。
       var ran = false
-      try await withThrowingTaskGroup(of: (LibraryWorkID, Bool?).self) { group in
-        var remaining = ready.makeIterator()
+      try await withThrowingTaskGroup(of: DownloadEvent.self) { group in
+        var remaining = ready[...]
+        var scheduled = Set(ready)
+        var running = 0
         func submit(_ id: LibraryWorkID) {
+          running += 1
           group.addTask {
             do {
               let done = try await self.download(library, id: id, sites: sites, works: works, pages: pages)
-              return (id, done)
+              return .finished(id, done)
             } catch where Task.isCancelled { throw CancellationError() }
-            catch { return (id, nil) }
+            catch { return .finished(id, nil) }
           }
         }
-        for _ in 0..<Int(sites * works) {
-          guard let id = remaining.next() else { break }
-          submit(id)
+        func listen() {
+          guard let changes else { return }
+          group.addTask {
+            for await _ in changes { return .queueChanged }
+            return .closed
+          }
         }
-        while let (id, result) = try await group.next() {
+        listen()
+        while true {
+          while running < Int(sites * works), let id = remaining.popFirst() { submit(id) }
+          guard running > 0, let event = try await group.next() else { break }
           try Task.checkCancellation()
-          if result == nil { failed.insert(id) }
-          if result != false { ran = true; await changed() }
-          if let next = remaining.next() { submit(next) }
+          switch event {
+          case .finished(let id, let result):
+            running -= 1
+            if result == nil { failed.insert(id) }
+            if result != false { ran = true; await changed() }
+          case .queueChanged:
+            for id in try await pendingWorks() where !failed.contains(id) && scheduled.insert(id).inserted {
+              remaining.append(id)
+            }
+            listen()
+          case .closed: break
+          }
         }
+        group.cancelAll()
       }
       if !ran { try await Task.sleep(nanoseconds: 700_000_000) }
     }
   }
+}
+
+private enum DownloadEvent: Sendable {
+  case queueChanged, closed
+  case finished(LibraryWorkID, Bool?)
 }

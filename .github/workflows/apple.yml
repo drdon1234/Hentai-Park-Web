@@ -19,7 +19,7 @@ on:
       scope:
         description: 复验全部目标，或仅比较相邻模拟器运行时
         type: choice
-        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, shelf, collection, mac-domains, mac-shelf, mac-setup, migration, download-actions, discovery-scope, full-history, download-entry, shelf-display, detail-sections, host-actions, host-tags, host-directory, host-metadata, host-update-route, host-update-management, host-chapter-actions, host-queue-batch, host-reader-modes, host-dictionaries, host-record-recovery, host-download-media, host-game-resources, host-comic-export, host-categories, host-categories-empty, host-feed-pages, host-comments, host-comment-link, host-favorites, host-preview, host-preview-mac, host-categories-mac, host-feed-pages-mac, host-tag-pages-mac, host-favorite-windows, storage, domain-recheck]
+        options: [full, runtime, phone, media, queue, privacy, layout, capture, review, write, native, record, contract, movie, game, audio, domains, reading, pictures, tavern, setup, host-onboarding-cancel, shelf, collection, mac-domains, mac-shelf, mac-setup, migration, download-actions, discovery-scope, full-history, download-entry, shelf-display, detail-sections, host-actions, host-tags, host-directory, host-metadata, host-update-route, host-update-management, host-chapter-actions, host-queue-batch, host-reader-modes, host-dictionaries, host-record-recovery, host-download-media, host-game-resources, host-comic-export, host-categories, host-categories-empty, host-feed-pages, host-comments, host-comment-link, host-favorites, host-preview, host-preview-mac, host-categories-mac, host-feed-pages-mac, host-tag-pages-mac, host-favorite-windows, storage, domain-recheck]
         default: full
 permissions:
   contents: read
@@ -160,7 +160,7 @@ jobs:
           || contains(fromJSON('["media","download-actions","discovery-scope","migration","full-history","download-entry","shelf-display","detail-sections","host-actions","host-tags","host-directory","host-metadata","host-update-route","host-update-management","host-chapter-actions","host-queue-batch","host-reader-modes","host-dictionaries","host-record-recovery","host-download-media","host-game-resources","host-comic-export","host-categories","host-categories-empty","host-feed-pages","host-comments","host-comment-link","host-favorites","host-preview","storage"]'), inputs.scope) && '[{"host":"macOS","runtime":"host"},{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'audio' && '[{"host":"iPhone","runtime":"18.6"}]'
           || inputs.scope == 'domain-recheck' && '[{"host":"iPhone","runtime":"18.6"}]'
-          || contains(fromJSON('["movie","domains","reading","pictures","tavern","setup","shelf","collection","game"]'), inputs.scope) && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
+          || contains(fromJSON('["movie","domains","reading","pictures","tavern","setup","host-onboarding-cancel","shelf","collection","game"]'), inputs.scope) && '[{"host":"iPhone","runtime":"18.6"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'native' && '[{"host":"iPhone","runtime":"26.2"},{"host":"iPad","runtime":"26.2"}]'
           || inputs.scope == 'phone' && '[{"host":"iPhone","runtime":"26.2"}]' || inputs.scope == 'runtime'
           && '[{"host":"iPhone","runtime":"18.5"},{"host":"iPhone","runtime":"18.6"}]'
@@ -223,6 +223,7 @@ jobs:
                                      "fdaf167c7839870c77b0c2efcb178adf5eef6ff3d3c0831c35c015a33f7b05d3" if os.environ["EXERCISE_SCOPE"] == "detail-sections" else
                                      "805376221ef5abd35787d255de5282fa51dbee63dd1d4c56403e3ea470254a8b" if os.environ["EXERCISE_SCOPE"] == "discovery-scope" else
                                      "5e3dcf168c2128d6d2a4dc9a65b6644e8a13d313a3aedb1636e12c0437d5813d" if os.environ["EXERCISE_SCOPE"] == "download-actions" else
+                                     "656f902e69f09da35d1e04edd03c3780cef34c97a92fed80fdbcb2b99ab62aac" if os.environ["EXERCISE_SCOPE"] == "host-onboarding-cancel" else
                                      "30785acdc161f1d9f3c3181827e7e1685e9ec7b182de155c0ebfa9c78540be2b" if os.environ["EXERCISE_SCOPE"] == "setup" else
                                      "e8b98734706140939a2157137a73df73e00e69617f54602885bf2fb9b0be1d4a" if os.environ["EXERCISE_SCOPE"] == "shelf" else
                                      "a36fd8f574664d8c1f59cef6ee8690989d12aaf98ee2b3154d3cb615251b4bee" if os.environ["EXERCISE_SCOPE"] == "collection" else
@@ -266,11 +267,11 @@ jobs:
           if [[ "$SIMULATOR_RUNTIME" == 26.2 ]]; then
             export DEVELOPER_DIR=/Applications/Xcode_26.2.app/Contents/Developer
             xcodebuild -version
-            if [[ "$EXERCISE_SCOPE" != native && "$EXERCISE_SCOPE" != domains && "$EXERCISE_SCOPE" != domain-recheck && "$EXERCISE_SCOPE" != reading && "$EXERCISE_SCOPE" != pictures && "$EXERCISE_SCOPE" != tavern && "$EXERCISE_SCOPE" != setup && "$EXERCISE_SCOPE" != shelf && "$EXERCISE_SCOPE" != collection && "$EXERCISE_SCOPE" != migration && "$EXERCISE_SCOPE" != movie && "$EXERCISE_SCOPE" != game ]]; then
+            if [[ "$EXERCISE_SCOPE" != native && "$EXERCISE_SCOPE" != domains && "$EXERCISE_SCOPE" != domain-recheck && "$EXERCISE_SCOPE" != reading && "$EXERCISE_SCOPE" != pictures && "$EXERCISE_SCOPE" != tavern && "$EXERCISE_SCOPE" != setup && "$EXERCISE_SCOPE" != host-onboarding-cancel && "$EXERCISE_SCOPE" != shelf && "$EXERCISE_SCOPE" != collection && "$EXERCISE_SCOPE" != migration && "$EXERCISE_SCOPE" != movie && "$EXERCISE_SCOPE" != game ]]; then
               npm install -g appium@3.1.2
               appium driver install xcuitest@11.5.0
             fi
-          elif [[ "$HOST_KIND" == macOS ]] || [[ "$EXERCISE_SCOPE" != movie && "$EXERCISE_SCOPE" != game && "$EXERCISE_SCOPE" != domains && "$EXERCISE_SCOPE" != domain-recheck && "$EXERCISE_SCOPE" != reading && "$EXERCISE_SCOPE" != pictures && "$EXERCISE_SCOPE" != tavern && "$EXERCISE_SCOPE" != setup && "$EXERCISE_SCOPE" != shelf && "$EXERCISE_SCOPE" != collection && "$EXERCISE_SCOPE" != migration && "$EXERCISE_SCOPE" != audio ]]; then
+          elif [[ "$HOST_KIND" == macOS ]] || [[ "$EXERCISE_SCOPE" != movie && "$EXERCISE_SCOPE" != game && "$EXERCISE_SCOPE" != domains && "$EXERCISE_SCOPE" != domain-recheck && "$EXERCISE_SCOPE" != reading && "$EXERCISE_SCOPE" != pictures && "$EXERCISE_SCOPE" != tavern && "$EXERCISE_SCOPE" != setup && "$EXERCISE_SCOPE" != host-onboarding-cancel && "$EXERCISE_SCOPE" != shelf && "$EXERCISE_SCOPE" != collection && "$EXERCISE_SCOPE" != migration && "$EXERCISE_SCOPE" != audio ]]; then
             npm install -g appium@2.19.0
             if [[ "$HOST_KIND" == macOS ]]; then
               appium driver install mac2@2.2.2

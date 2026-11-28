@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 mod queue;
 pub use queue::{
-    change_status, finish_chapter, plan, record_failure, video_pending, with_chapter, DownloadPlan, DownloadSlot,
+    change_queue_batch, change_status, finish_chapter, plan, record_failure, video_pending, with_chapter, ActiveDownloads, DownloadPlan, DownloadSlot,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -168,7 +168,12 @@ fn remove_owned(path: &Path, directory: bool) -> Result<()> {
 
 /// 分两次提交。首次提交后即使进程终止，仍可用同一任务重试原范围。
 pub fn delete(db: &mut Connection, source: &str, work: &str, requested: &[String]) -> Result<bool> {
-    delete_selected(db, source, work, Some(requested)).map(|(whole, _)| whole)
+    delete_selected(db, source, work, Some(requested), None).map(|(whole, _)| whole)
+}
+
+/// 详情页确认只对当时显示的任务有效。
+pub fn delete_confirmed(db: &mut Connection, source: &str, work: &str, created_at: i64) -> Result<bool> {
+    delete_selected(db, source, work, Some(&[]), Some(created_at)).map(|(whole, _)| whole)
 }
 
 pub fn delete_read(db: &mut Connection) -> Result<u64> {
@@ -180,14 +185,19 @@ pub fn delete_read(db: &mut Connection) -> Result<u64> {
     drop(query);
     let mut count = 0;
     for (source, work) in works {
-        count += delete_selected(db, &source, &work, None)?.1;
+        count += delete_selected(db, &source, &work, None, None)?.1;
     }
     Ok(count)
 }
 
-fn delete_selected(db: &mut Connection, source: &str, work: &str, requested: Option<&[String]>) -> Result<(bool,u64)> {
+fn delete_selected(db: &mut Connection, source: &str, work: &str, requested: Option<&[String]>, created_at: Option<i64>) -> Result<(bool,u64)> {
     let uid = format!("{source}:{work}");
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    if let Some(expected) = created_at {
+        let current: Option<i64> = tx.query_row("SELECT created_at FROM download_tasks WHERE uid=? AND source=?",
+            params![uid,source], |row| row.get(0)).optional()?;
+        if current != Some(expected) { return Err(Error::Unavailable); }
+    }
     let (_, mut data) = match task(&tx, &uid, source, work) {
         Err(Error::Unavailable) if requested.is_none() => return Ok((false,0)),
         result => result?,

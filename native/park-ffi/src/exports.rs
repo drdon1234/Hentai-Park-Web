@@ -42,6 +42,160 @@ impl From<park_media::Error> for StorageError {
 }
 #[uniffi::export]
 impl ProgressStore {
+    /// Windows 每章拥有一条下载记录和一个独立的完成清单。
+    pub fn export_windows_comic(
+        &self,
+        source: String,
+        work_id: String,
+        chapters: Vec<String>,
+        format: ComicFormat,
+        max_pages: i32,
+        download_directory: String,
+        locale: String,
+        request: Arc<Request>,
+    ) -> Result<Vec<String>, StorageError> {
+        if chapters.is_empty() || !(0..=5000).contains(&max_pages) {
+            return Err(StorageError::InvalidDownload);
+        }
+        let root = Path::new(&download_directory)
+            .canonicalize()
+            .map_err(|_| StorageError::UnavailableDownload)?;
+        let output = root.join("exports");
+        std::fs::create_dir_all(&output).map_err(|_| StorageError::IoFailure)?;
+        if output.canonicalize().map_err(|_| StorageError::IoFailure)? != output {
+            return Err(StorageError::InvalidDownload);
+        }
+        let stage = tempfile::Builder::new()
+            .prefix(".park-export-")
+            .tempdir_in(&output)
+            .map_err(|_| StorageError::IoFailure)?;
+        let mut staged = Vec::new();
+        let copy = park_domain::LocalizedCopy::new(&locale, Value::Null);
+        let mut seen = std::collections::HashSet::new();
+        let check = || request.check().map_err(|_| park_media::Error::Cancelled);
+        for chapter in chapters {
+            request.check()?;
+            if !seen.insert(chapter.clone()) {
+                return Err(StorageError::InvalidDownload);
+            }
+            let (raw, dir): (String, String) = self
+                .lock()?
+                .query_row(
+                    "SELECT json,dir FROM download_tasks WHERE uid=?1 AND source=?2",
+                    params![format!("{source}:{work_id}:{chapter}"), source],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?
+                .ok_or(StorageError::UnavailableDownload)?;
+            let task: Value =
+                serde_json::from_str(&raw).map_err(|_| StorageError::InvalidDownload)?;
+            let work = &task["work"];
+            if task["status"] != "Completed"
+                || task["chapterId"] != chapter
+                || work["id"] != work_id
+                || work["mediaKind"].as_str().unwrap_or("comic") != "comic"
+            {
+                return Err(StorageError::InvalidDownload);
+            }
+            let folder = Path::new(&dir)
+                .canonicalize()
+                .map_err(|_| StorageError::UnavailableDownload)?;
+            if !folder.starts_with(&root) || folder == root || folder.starts_with(&output) {
+                return Err(StorageError::InvalidDownload);
+            }
+            let owned = |name: &str| -> Result<_, StorageError> {
+                let path = folder.join(name);
+                if path
+                    .canonicalize()
+                    .map_err(|_| StorageError::UnavailableDownload)?
+                    != path
+                    || !path.is_file()
+                {
+                    return Err(StorageError::InvalidDownload);
+                }
+                Ok(path)
+            };
+            let manifest: Value = serde_json::from_reader(
+                std::fs::File::open(owned("pages.json")?)
+                    .map_err(|_| StorageError::UnavailableDownload)?,
+            )
+            .map_err(|_| StorageError::InvalidDownload)?;
+            let count = manifest["count"]
+                .as_u64()
+                .filter(|n| (1..=100_000).contains(n))
+                .ok_or(StorageError::InvalidDownload)?;
+            if manifest["completed"] != true {
+                return Err(StorageError::UnavailableDownload);
+            }
+            let mut pages = Vec::new();
+            for index in 0..count {
+                let page = park_media::prepare(
+                    park_media::PageFile::Original(owned(&format!("{index:04}.img"))?),
+                    0,
+                    false,
+                    stage.path(),
+                    &request.cancelled,
+                )?;
+                pages.push(Arc::new(page));
+            }
+            let title = work["title"].as_str().unwrap_or(&work_id);
+            let label = task["chapterTitle"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(&chapter);
+            let basename = format!(
+                "{} - {}",
+                exports::filename(title),
+                exports::filename(label)
+            );
+            match format {
+                ComicFormat::Cbz => {
+                    let mut names = Vec::new();
+                    tags(&work["tags"], "", &mut names);
+                    let writer = work["authors"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let info = ComicInfo {
+                        title: label.into(),
+                        series: title.into(),
+                        writer,
+                        tags: names.join(", "),
+                        web: work["url"].as_str().unwrap_or("").into(),
+                    };
+                    staged.push(exports::cbz(
+                        stage.path(),
+                        &basename,
+                        &info,
+                        &pages,
+                        &check,
+                    )?);
+                }
+                ComicFormat::Pdf => staged.extend(exports::pdf_volumes(
+                    stage.path(),
+                    &basename,
+                    &format!("{title} - {label}"),
+                    &pages,
+                    max_pages as usize,
+                    |n| {
+                        copy.text(
+                            "第 {value0} 部分",
+                            &HashMap::from([("value0".to_owned(), n.to_string())]),
+                        )
+                    },
+                    &check,
+                )?),
+            }
+        }
+        Ok(exports::publish(&output, staged, &check)?
+            .into_iter()
+            .filter_map(|p| p.file_name()?.to_str().map(str::to_owned))
+            .collect())
+    }
+
     pub fn export_comic(
         &self,
         source: String,

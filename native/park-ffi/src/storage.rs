@@ -70,6 +70,14 @@ impl ProgressStore {
         Self::from_root(root, db, None)
     }
 
+    pub fn reader_mode(&self, key: ChapterKey) -> Result<Option<i32>> {
+        use rusqlite::OptionalExtension;
+        Ok(self.lock()?.query_row(
+            "SELECT reader_mode FROM works WHERE source=? AND id=?",
+            [&key.source, &key.work_id], |row| row.get(0),
+        ).optional()?.flatten())
+    }
+
     pub fn set_reader_mode(&self, key: ChapterKey, mode: Option<i32>) -> Result<()> {
         Ok(self.ledger.set_reader_mode(&key, mode)?)
     }

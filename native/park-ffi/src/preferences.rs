@@ -39,6 +39,16 @@ pub fn public_contract() -> String {
 }
 
 #[uniffi::export]
+pub fn block_vocabulary() -> String {
+    park_domain::BLOCK_VOCABULARY.to_owned()
+}
+
+#[uniffi::export]
+pub fn block_rule_error(rule: String) -> Option<String> {
+    park_domain::BlockFilter::rule_error(&rule).map(str::to_owned)
+}
+
+#[uniffi::export]
 pub fn discovery_domains(order: Vec<String>, dimension: String, media: String) -> Vec<String> {
     park_domain::settings::discovery_domains(&order, &dimension, &media)
 }
@@ -106,5 +116,8 @@ impl ContentFilter {
     }
     pub fn first_match(&self, title: String, tags: Vec<String>) -> Option<String> {
         self.0.first_match(&title, &tags)
+    }
+    pub fn work_match(&self,source:String,id:String,title:String,tags:Vec<String>,authors:Vec<String>)->Option<String>{
+        self.0.work_match(&source,&id,&title,&tags,&authors)
     }
 }

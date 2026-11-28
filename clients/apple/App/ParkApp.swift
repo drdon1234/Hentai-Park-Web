@@ -186,6 +186,8 @@ struct ParkApp: App {
                 privacy = try await session.privacySettings()
             } catch { await session.close(); throw error }
             await session.close()
+        } catch let error as LAError where error.code == .userCancel {
+            return
         } catch { failed = true }
     }
 
@@ -209,18 +211,15 @@ struct ParkApp: App {
         } catch { failed = true }
     }
 
-    func finishOnboarding(categories: Set<String>, secureScreen: Bool, appLock: Bool, blurCovers: Bool) async {
+    func finishOnboarding(categories: Set<String>, secureScreen: Bool, blurCovers: Bool) async {
         guard !busy else { return }
         busy = true
         failed = false
         defer { busy = false }
         do {
-            if appLock, privacy?.appLock != true {
-                guard try await authenticateOwner() else { failed = true; return }
-            }
             let session = try await ProgressSession.openApplicationLibrary()
             do {
-                try await session.completeOnboarding(categories: categories.sorted(), secureScreen: secureScreen, appLock: appLock, blurCovers: blurCovers)
+                try await session.completeOnboarding(categories: categories.sorted(), secureScreen: secureScreen, blurCovers: blurCovers)
                 privacy = try await session.privacySettings()
             } catch { await session.close(); throw error }
             await session.close()
@@ -571,7 +570,7 @@ private final class LibraryModel: ObservableObject {
                 if index == 2 {
                     Button(access.tr("录制分卷")) { destination = .recordings }
                     if let session = model.session {
-                        DownloadControls(selection: downloadSelection, works: filtered,
+                        DownloadControls(selection: downloadSelection, works: filtered, allWorks: rows,
                                          untypedSources: Set(rows.filter { $0.downloaded && !$0.invalidDownload && $0.itemKind == nil }.map(\.source)),
                                          session: session, tr: access.tr, showExports: { showingComicExports = true },
                                          manageCategories: { destination = .categories })
@@ -657,6 +656,10 @@ private final class LibraryModel: ObservableObject {
                                 if index == 2, !downloadSelection.selecting, work.source != "local", work.media != "bundle" {
                                     Button(access.tr("作品详情")) { destination = .work(work) }
                                         .buttonStyle(.borderless)
+                                }
+                                if index == 2, !downloadSelection.selecting, work.downloaded, !work.invalidDownload,
+                                   work.pendingDeletion == nil, let session = model.session {
+                                    DownloadCategoryButton(work: work, session: session, tr: access.tr)
                                 }
                                 if index == 2, !downloadSelection.selecting, let state = work.downloadStatus, state != 3,
                                    !work.invalidDownload, work.pendingDeletion == nil, let session = model.session {
@@ -767,31 +770,96 @@ private final class LibraryModel: ObservableObject {
     @State private var busy = true
     @State private var failed = false
 
+    @State private var readingSettings: ComicReadingSettings?
+    @State private var savingMode = false
+    @State private var modeError = false
+    @State private var settingsRevision = 0
+    @State private var scrollTarget: Int32?
+
+    private func changeMode(_ operation: @escaping () async throws -> Void) {
+        guard !savingMode else { return }
+        savingMode = true
+        Task {
+            defer { savingMode = false }
+            do { try await operation(); modeError = false }
+            catch { modeError = true }
+        }
+    }
+
+    private var modeMenu: some View {
+        Menu(tr("阅读设置")) {
+            if let settings = readingSettings {
+                Picker(tr("阅读模式（仅本作）"), selection: Binding(
+                    get: { settings.effective },
+                    set: { value in changeMode { try await session.setComicMode(key, mode: value) } }
+                )) {
+                    ForEach(ComicReadingMode.allCases, id: \.self) { mode in
+                        Text(tr(mode.label)).tag(mode)
+                    }
+                }
+                if settings.workMode != nil {
+                    if settings.workMode != settings.defaultMode {
+                        Button(tr("设为默认")) { changeMode { try await session.promoteComicMode(key) } }
+                    }
+                    Button(tr("跟随默认")) { changeMode { try await session.setComicMode(key, mode: nil) } }
+                }
+            } else {
+                Button(tr("重试")) { settingsRevision += 1 }
+            }
+        }.disabled(savingMode)
+    }
+
     var body: some View {
         VStack {
             HStack {
                 if showBack { Button(tr("返回"), action: back) }
                 Text(work.title).lineLimit(2)
                 Spacer()
+                modeMenu
                 if count > 0 { Text("\(current + 1) / \(count)").monospacedDigit() }
             }.padding()
+            if modeError {
+                Button(tr("保存失败，请重试")) { modeError = false; settingsRevision += 1 }
+            }
             if failed {
                 Text(tr("加载失败"))
                 Button(tr("重试")) { retry += 1 }
                 Spacer()
+            } else if readingSettings?.effective == .vertical, let images, count > 0 {
+                ComicPageStrip(session: session, images: images, count: count, initial: current, jump: scrollTarget, tr: tr) { index in
+                    if current != index && requested != index { turn(index, scroll: false) }
+                }
             } else if let image {
                 Image(decorative: image, scale: 1).resizable().scaledToFit()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 35).onEnded { drag in
+                        guard !busy, abs(drag.translation.width) > abs(drag.translation.height) else { return }
+                        let next = (drag.translation.width < 0) != (readingSettings?.effective == .rightToLeft)
+                        turn(current + (next ? 1 : -1))
+                    })
             } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
             HStack {
                 Button(tr("上一页")) { turn(current - 1) }.disabled(busy || current == 0)
                 Spacer()
                 Button(tr("下一页")) { turn(current + 1) }.disabled(busy || current + 1 >= count)
-            }.padding()
+            }.environment(\.layoutDirection, readingSettings?.effective == .rightToLeft ? .rightToLeft : .leftToRight)
+             .padding()
         }.task(id: retry) { await load() }
+         .task(id: settingsRevision) {
+            do {
+                let settings = try await session.comicReadingSettings(key)
+                try Task.checkCancellation()
+                readingSettings = settings
+                modeError = false
+            } catch { if !Task.isCancelled { modeError = true } }
+         }
+         .onReceive(NotificationCenter.default.publisher(for: .parkReaderModeChanged)) { _ in settingsRevision += 1 }
     }
 
-    private func turn(_ index: Int32) {
+    private func turn(_ index: Int32, scroll: Bool = true) {
+        guard (0..<count).contains(index) else { return }
+        if scroll { scrollTarget = index } else { scrollTarget = nil }
         busy = true
         requested = index
         retry += 1
@@ -838,6 +906,84 @@ private final class LibraryModel: ObservableObject {
             count = total
             requested = nil
         } catch { if !Task.isCancelled { failed = true } }
+    }
+}
+
+private struct VisibleComicRows: PreferenceKey {
+    static var defaultValue: [Int32: CGFloat] { [:] }
+    static func reduce(value: inout [Int32: CGFloat], nextValue: () -> [Int32: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+@MainActor private struct ComicPageStrip: View {
+    let session: ProgressSession
+    let images: ChapterImages
+    let count: Int32
+    let initial: Int32
+    let jump: Int32?
+    let tr: (String) -> String
+    let visible: (Int32) -> Void
+    @Namespace private var viewport
+    @State private var aligned = false
+
+    var body: some View {
+        GeometryReader { area in
+            ScrollViewReader { reader in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(0..<Int(count), id: \.self) { n in
+                            ComicStripImage(session: session, chapter: images, index: Int32(n), tr: tr)
+                                .frame(width: area.size.width, height: area.size.height)
+                                .background(GeometryReader { row in
+                                    Color.clear.preference(key: VisibleComicRows.self,
+                                        value: [Int32(n): row.frame(in: .named(viewport)).midY])
+                                })
+                        }
+                    }
+                }.coordinateSpace(name: viewport)
+                 .onAppear { reader.scrollTo(Int(initial), anchor: .center) }
+                 .onChange(of: jump) { value in
+                     if let value { reader.scrollTo(Int(value), anchor: .center) }
+                 }
+                 .onPreferenceChange(VisibleComicRows.self) { rows in
+                     guard let nearest = rows.min(by: {
+                         abs($0.value - area.size.height / 2) < abs($1.value - area.size.height / 2)
+                     }) else { return }
+                     if !aligned {
+                         guard nearest.key == initial else { return }
+                         aligned = true
+                     }
+                     visible(nearest.key)
+                 }
+            }
+        }
+    }
+}
+
+@MainActor private struct ComicStripImage: View {
+    let session: ProgressSession
+    let chapter: ChapterImages
+    let index: Int32
+    let tr: (String) -> String
+    @State private var pixels: CGImage?
+    @State private var failed = false
+    @State private var attempt = 0
+    var body: some View {
+        Group {
+            if let pixels { Image(decorative: pixels, scale: 1).resizable().scaledToFit() }
+            else if failed { Button(tr("重试")) { attempt += 1 } }
+            else { ProgressView() }
+        }.task(id: attempt) {
+            if pixels != nil { return }
+            failed = false
+            do {
+                let asset = try await session.pageImage(chapter, index: index)
+                let image = try await decodedPage(asset, maxSize: 4096)
+                try Task.checkCancellation()
+                pixels = image
+            } catch { if !Task.isCancelled { failed = true } }
+        }.onDisappear { pixels = nil }
     }
 }
 
@@ -1189,14 +1335,20 @@ private struct AppleSettingsForm<Content: View>: View {
     @ObservedObject var access: LibraryAccess
     @State private var blurCovers = false
     @State private var secureScreen = false
-    @State private var appLock = false
     @State private var categories = Set(appleCategoryOptions.map { $0.id })
+
+    private func complete(_ selected: Set<String>) {
+        Task { await access.finishOnboarding(categories: selected, secureScreen: secureScreen, blurCovers: blurCovers) }
+    }
 
     private var finish: some View {
         Button(access.tr("完成设置")) {
-            let selected: Set<String> = categories.count == appleCategoryOptions.count ? [] : categories
-            Task { await access.finishOnboarding(categories: selected, secureScreen: secureScreen, appLock: appLock, blurCovers: blurCovers) }
+            complete(categories.count == appleCategoryOptions.count ? [] : categories)
         }.disabled(access.busy || categories.isEmpty)
+    }
+
+    private var skip: some View {
+        Button(access.tr("跳过")) { complete([]) }.disabled(access.busy)
     }
 
     var body: some View {
@@ -1207,7 +1359,10 @@ private struct AppleSettingsForm<Content: View>: View {
             Section(header: Text(access.tr("隐私"))) {
                 Toggle(access.tr("模糊封面"), isOn: $blurCovers)
                 Toggle(access.tr("安全屏幕"), isOn: $secureScreen)
-                Toggle(access.tr("应用锁"), isOn: $appLock)
+                Toggle(access.tr("应用锁"), isOn: Binding(
+                    get: { access.privacy?.appLock == true },
+                    set: { value in Task { await access.updatePrivacy("appLock", enabled: value) } }
+                ))
             }
             Section(header: Text(access.tr("首页兴趣"))) {
                 ForEach(appleCategoryOptions) { option in
@@ -1222,6 +1377,7 @@ private struct AppleSettingsForm<Content: View>: View {
             }
             if access.failed { Text(access.tr("保存失败，请重试")) }
             #if !os(macOS)
+            skip
             finish
             #endif
         }
@@ -1229,7 +1385,7 @@ private struct AppleSettingsForm<Content: View>: View {
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
                 Divider()
-                HStack { Spacer(); finish.keyboardShortcut(.defaultAction) }.padding()
+                HStack { Spacer(); skip; finish.keyboardShortcut(.defaultAction) }.padding()
             }.background(.regularMaterial)
         }
         #endif
@@ -1237,7 +1393,6 @@ private struct AppleSettingsForm<Content: View>: View {
         .onAppear {
             secureScreen = access.privacy?.secureScreen == true
             blurCovers = access.privacy?.blurCovers == true
-            appLock = access.privacy?.appLock == true
             if let saved = access.privacy?.homeCategories, !saved.isEmpty { categories = Set(saved) }
         }
     }

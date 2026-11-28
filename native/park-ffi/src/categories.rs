@@ -216,6 +216,68 @@ impl ProgressStore {
             Some(&categories),
         )?)
     }
+
+    pub fn set_download_categories(&self, source: String, work: String, categories: Vec<i64>) -> Result<(), StorageError> {
+        let mut db = self.lock()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let raw: String = tx.query_row("SELECT json FROM download_tasks WHERE source=? AND uid=?",
+            params![source, format!("{source}:{work}")], |r| r.get(0))?;
+        let task: serde_json::Value = serde_json::from_str(&raw).map_err(|_| StorageError::InvalidDownload)?;
+        let item = &task["item"];
+        if item["source"] != source || item["id"] != work {
+            return Err(StorageError::InvalidDownload);
+        }
+        park_storage::library::upsert_summary(&tx, &source, item)?;
+        park_storage::library::replace_categories(&tx, &source, &work, &categories)?;
+        Ok(tx.commit()?)
+    }
+
+    pub fn edit_download_categories(&self, source: String, work: String, chapter: Option<String>,
+        added: Vec<i64>, removed: Vec<i64>) -> Result<(), StorageError> {
+        let uid = match &chapter {
+            Some(id) => format!("{source}:{work}:{id}"),
+            None => format!("{source}:{work}"),
+        };
+        let mut db = self.lock()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let raw: String = tx.query_row("SELECT json FROM download_tasks WHERE uid=? AND source=?",
+            params![uid,source], |row| row.get(0))?;
+        let task: serde_json::Value = serde_json::from_str(&raw).map_err(|_| StorageError::InvalidDownload)?;
+        let item = match chapter {
+            Some(id) if task["chapterId"] == id => &task["work"],
+            None if task["item"]["source"] == source => &task["item"],
+            _ => return Err(StorageError::InvalidDownload),
+        };
+        if item["id"] != work || item["source"].as_str().is_some_and(|s| s != source) {
+            return Err(StorageError::InvalidDownload);
+        }
+        let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM works WHERE source=? AND id=?)",
+            params![source,work], |row| row.get(0))?;
+        if !exists {
+            park_storage::library::upsert_summary(&tx, &source, item)?;
+        }
+        edit_memberships(&tx, &source, &work, added, removed)?;
+        Ok(tx.commit()?)
+    }
+
+    pub fn edit_favorite_categories(&self, source: String, work: String, added: Vec<i64>, removed: Vec<i64>) -> Result<(), StorageError> {
+        let mut db = self.lock()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.query_row("SELECT 1 FROM works WHERE source=? AND id=? AND favorite=1", params![source, work], |_| Ok(()))?;
+        edit_memberships(&tx, &source, &work, added, removed)?;
+        Ok(tx.commit()?)
+    }
+}
+
+fn edit_memberships(tx: &rusqlite::Transaction<'_>, source: &str, work: &str, added: Vec<i64>, removed: Vec<i64>) -> rusqlite::Result<()> {
+    for id in removed {
+        tx.execute("DELETE FROM work_categories WHERE source=? AND work_id=? AND category_id=?", params![source, work, id])?;
+    }
+    for id in added {
+        tx.query_row("SELECT id FROM categories WHERE id=?", [id], |_| Ok(()))?;
+        tx.execute("INSERT OR IGNORE INTO work_categories(source,work_id,category_id) VALUES(?,?,?)", params![source, work, id])?;
+    }
+    Ok(())
 }
 
 fn set_chapters_read(db: &rusqlite::Connection, source: &str, work: &str, now: i64, playable: bool) -> rusqlite::Result<()> {

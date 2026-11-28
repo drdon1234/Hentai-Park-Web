@@ -1,5 +1,26 @@
 import Foundation
 
+private actor ExportDirectories {
+  static let shared = ExportDirectories()
+
+  func roots(current: URL, library: URL, remember: Bool) throws -> Set<URL> {
+    #if os(iOS)
+      return [current]
+    #else
+      let registry = library.appendingPathComponent("export_directories.json")
+      let saved = FileManager.default.fileExists(atPath: registry.path)
+        ? try JSONDecoder().decode([String].self, from: Data(contentsOf: registry)) : []
+      guard saved.allSatisfy({ $0.hasPrefix("/") }) else { throw SiteReadError.malformed }
+      var roots = Set(saved.map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL })
+      let inserted = roots.insert(current.standardizedFileURL).inserted
+      if remember && inserted {
+        try JSONEncoder().encode(roots.map(\.path).sorted()).write(to: registry, options: .atomic)
+      }
+      return roots
+    #endif
+  }
+}
+
 private struct DownloadPreferences: Decodable, Sendable {
   let adultConfirmed: Bool?
   let downloadWifiOnly: Bool?
@@ -24,9 +45,41 @@ public extension LibraryWork {
   var libraryID: LibraryWorkID { LibraryWorkID(source: source, work: workId) }
 }
 
+public enum DownloadLimit: String, CaseIterable, Sendable {
+  case sites = "downloadSiteConcurrency"
+  case works = "downloadTaskConcurrency"
+  case pages = "downloadConcurrency"
+}
+
 extension ProgressSession {
+  public func downloadLimits() async throws -> [DownloadLimit: Int] {
+    let settings = try await preferences(DownloadPreferences.self)
+    return [
+      .sites: Int(settings.limit(settings.downloadSiteConcurrency, default: 3)),
+      .works: Int(settings.limit(settings.downloadTaskConcurrency, default: 1)),
+      .pages: Int(settings.limit(settings.downloadConcurrency, default: 3)),
+    ]
+  }
+
+  public func setDownloadLimit(_ limit: DownloadLimit, to value: Int) async throws {
+    guard (1...8).contains(value) else { throw CocoaError(.coderInvalidValue) }
+    try await run { store, _ in try store.savePreference(name: limit.rawValue, json: String(value)) }
+  }
+
   public func comicPdfLimit() async throws -> Int32 {
     try await preferences(DownloadPreferences.self).pdfPagesPerFile ?? 300
+  }
+
+  public func importComic(from url: URL, chapterTitle: String) async throws {
+    guard url.isFileURL, ["cbz", "zip"].contains(url.pathExtension.lowercased()) else {
+      throw SiteReadError.malformed
+    }
+    let settings = try await preferences(DownloadPreferences.self)
+    let destination = try downloadDirectory(configured: settings.downloadDirectory)
+    try await run { store, request in
+      _ = try store.importComic(archivePath: url.path, filename: url.lastPathComponent,
+        directory: destination.path, chapterTitle: chapterTitle, request: request)
+    }
   }
 
   public func exportComic(_ work: LibraryWork, pdfPages: Int32?) async throws -> [URL] {
@@ -35,6 +88,7 @@ extension ProgressSession {
       throw SiteReadError.malformed
     }
     let output = try downloadDirectory(configured: settings.downloadDirectory).appendingPathComponent("exports", isDirectory: true)
+    _ = try await ExportDirectories.shared.roots(current: output, library: directory, remember: true)
     let cache = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
     let locale = settings.language.flatMap { $0.isEmpty ? nil : $0 } ?? Locale.preferredLanguages.first ?? "en"
     return try await run { store, request in
@@ -52,13 +106,29 @@ extension ProgressSession {
     let settings = try await preferences(DownloadPreferences.self)
     let output = try downloadDirectory(configured: settings.downloadDirectory).appendingPathComponent("exports", isDirectory: true)
     let files = FileManager.default
-    guard files.fileExists(atPath: output.path) else { return [] }
-    let entries = try files.contentsOfDirectory(at: output, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey], options: .skipsHiddenFiles)
+    let roots = try await ExportDirectories.shared.roots(current: output, library: directory, remember: false)
+    let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey]
+    var entries: [URL] = []
+    for root in roots where files.fileExists(atPath: root.path) {
+      guard try root.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else { continue }
+      entries += try files.contentsOfDirectory(at: root, includingPropertiesForKeys: keys, options: .skipsHiddenFiles)
+    }
     return try entries.compactMap { url -> (URL, Date)? in
       let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey])
       guard values.isRegularFile == true, values.isSymbolicLink != true else { return nil }
       return (url, values.contentModificationDate ?? .distantPast)
-    }.sorted { $0.1 > $1.1 }.map(\.0)
+    }.sorted { $0.1 == $1.1 ? $0.0.path < $1.0.path : $0.1 > $1.1 }.map(\.0)
+  }
+
+  public func removeExportedComic(_ selected: URL, modified: Date, size: Int) async throws {
+    guard ["pdf", "cbz"].contains(selected.pathExtension.lowercased()),
+          try await exportedComics().contains(selected) else { throw SiteReadError.malformed }
+    let current = URL(fileURLWithPath: selected.path)
+    let values = try current.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isSymbolicLinkKey])
+    guard values.isSymbolicLink != true, values.contentModificationDate == modified, values.fileSize == size else {
+      throw SiteReadError.malformed
+    }
+    try FileManager.default.removeItem(at: current)
   }
 
   func downloadDirectory(configured: String?) throws -> URL {
@@ -101,6 +171,16 @@ extension ProgressSession {
     let root = try downloadDirectory(configured: settings.downloadDirectory)
     try await run { store, _ in
       _ = try links.enqueueDownload(store: store, directory: root.path, title: title)
+    }
+  }
+
+  public func changeQueue(_ works: [LibraryWork], resume: Bool) async throws {
+    let targets = works.map { DownloadTarget(source: $0.source, work: $0.workId) }
+    let changed = try await run { store, _ in try store.changeDownloadQueue(targets: targets, resume: resume) }
+    if !resume {
+      for target in changed {
+        downloadRequests[LibraryWorkID(source: target.source, work: target.work)]?.values.forEach { $0.cancel() }
+      }
     }
   }
 

@@ -18,10 +18,9 @@ struct Preset {
     strong_entries: Vec<String>,
 }
 
+pub const BLOCK_VOCABULARY: &str = include_str!("../../../clients/web/packages/domain-model/src/block-vocabulary.json");
 static VOCABULARY: LazyLock<Vocabulary> = LazyLock::new(|| {
-    serde_json::from_str(include_str!(
-        "../../../clients/web/packages/domain-model/src/block-vocabulary.json"
-    ))
+    serde_json::from_str(BLOCK_VOCABULARY)
     .expect("invalid packaged block vocabulary")
 });
 
@@ -123,13 +122,34 @@ struct Pattern {
 pub struct BlockFilter {
     titles: Vec<Pattern>,
     rules: Vec<Pattern>,
+    works: HashSet<String>,
+    authors: HashSet<String>,
+    author_works: HashSet<String>,
 }
 impl BlockFilter {
+    pub fn rule_error(raw: &str) -> Option<&'static str> {
+        let raw = raw.trim();
+        let rule = Rule::new(raw);
+        if rule.text.trim().is_empty() { return Some("请输入有效的屏蔽词"); }
+        if raw.encode_utf16().count()>256 { return Some("屏蔽规则不能超过 256 个字符"); }
+        if rule.regex && rule.compile(false,false).is_none() { return Some("正则表达式无效"); }
+        if rule.glob && rule.text.chars().all(|c| c=='*' || c=='?' || c.is_whitespace()) { return Some("通配符规则必须包含具体文字"); }
+        None
+    }
     pub fn from_settings(settings: &Value) -> Self {
         let mut filter = Self {
             titles: vec![],
             rules: vec![],
+            works: settings["blockedWorks"].as_object().into_iter().flat_map(|v| v.keys().cloned()).collect(),
+            authors: HashSet::new(),
+            author_works: HashSet::new(),
         };
+        if let Some(authors) = settings["blockedAuthors"].as_object() {
+            for (id,rule) in authors {
+                filter.authors.insert(id.clone());
+                filter.author_works.extend(strings(&rule["works"]).unwrap_or_default());
+            }
+        }
         for raw in strings(&settings["blockedTags"]).unwrap_or_default() {
             let rule = Rule::new(&raw);
             let aliases = if !rule.regex && !rule.glob && !rule.text.is_empty() {
@@ -218,6 +238,15 @@ impl BlockFilter {
                 });
             }
         }
+    }
+
+    pub fn work_match(&self, source:&str, id:&str, title:&str, tags:&[String], authors:&[String]) -> Option<String> {
+        let uid=format!("{source}:{id}");
+        if self.works.contains(&uid) {return Some("已屏蔽作品".into());}
+        if self.author_works.contains(&uid) || authors.iter().any(|a|self.authors.contains(&format!("{source}:{}",a.trim().to_lowercase()))) {
+            return Some("已屏蔽作者".into());
+        }
+        self.first_match(title,tags)
     }
 
     pub fn first_match(&self, title: &str, tags: &[String]) -> Option<String> {

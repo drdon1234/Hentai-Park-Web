@@ -4,6 +4,7 @@ pub use categories::{FavoriteEdit, FavoriteIdentity, LibraryCategory};
 mod contract;
 pub use backup::BackupScope;
 mod exports;
+mod comic_import;
 pub use exports::ComicFormat;
 mod novel;
 mod offline;

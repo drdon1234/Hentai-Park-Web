@@ -228,6 +228,7 @@ import UIKit
         if row.status=="done", let file=row.file {
           Button(tr(copied ? "已复制" : "复制文件路径")) { copyGameField(file);copied=true }
           SavedFileExportButton(url: URL(fileURLWithPath: file), filename: row.filename, label: tr("导出游戏文件"), tr: tr)
+          FileShareButton(url: URL(fileURLWithPath: file), label: tr("分享"))
         } else { Button(tr("重新下载")) { change("resume") } }
         Button(tr("移除任务（保留文件）")) { change("remove") }
       }
@@ -242,6 +243,48 @@ import UIKit
     }
   }
 }
+
+#if os(macOS)
+@MainActor struct FileShareButton: NSViewRepresentable {
+  let url: URL
+  let label: String
+  final class Coordinator: NSObject {
+    var url: URL
+    init(url: URL) { self.url = url }
+    @MainActor @objc func show(_ button: NSButton) {
+      NSSharingServicePicker(items: [url]).show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+  }
+  func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+  func makeNSView(context: Context) -> NSButton {
+    NSButton(title: label, target: context.coordinator, action: #selector(Coordinator.show(_:)))
+  }
+  func updateNSView(_ button: NSButton, context: Context) {
+    button.title = label
+    context.coordinator.url = url
+  }
+}
+#else
+@MainActor struct FileShareButton: View {
+  let url: URL
+  let label: String
+  @State private var sharing = false
+  var body: some View {
+    Button(label) { sharing = true }
+      .sheet(isPresented: $sharing) { FileActivityView(url: url) { sharing = false } }
+  }
+}
+private struct FileActivityView: UIViewControllerRepresentable {
+  let url: URL
+  let finished: () -> Void
+  func makeUIViewController(context: Context) -> UIActivityViewController {
+    let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    controller.completionWithItemsHandler = { _, _, _, _ in finished() }
+    return controller
+  }
+  func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+#endif
 
 @MainActor struct SavedFileExportButton: View {
   let url: URL

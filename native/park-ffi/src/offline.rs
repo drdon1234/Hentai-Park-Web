@@ -8,6 +8,12 @@ mod bundle;
 pub use bundle::*;
 
 #[derive(Debug, uniffi::Record)]
+pub struct DownloadTarget {
+    pub source: String,
+    pub work: String,
+}
+
+#[derive(Debug, uniffi::Record)]
 pub struct LibraryWork {
     pub downloaded: bool,
     pub invalid_download: bool,
@@ -32,6 +38,42 @@ pub struct LibraryWork {
 pub struct OfflineChapter {
     pub id: String,
     pub title: String,
+}
+
+#[derive(uniffi::Record)]
+pub struct DownloadRowInfo {
+    pub status: i32,
+    pub chapters: Vec<OfflineChapter>,
+    pub completed: Vec<String>,
+    pub done: u64,
+    pub total: u64,
+    pub bytes: u64,
+    pub error: Option<String>,
+}
+
+#[derive(uniffi::Record)]
+pub struct DetailDownloadTask {
+    pub created_at: i64,
+    pub completed: bool,
+}
+
+#[derive(uniffi::Record)]
+pub struct DetailResume {
+    pub chapter_id: Option<String>,
+    pub chapter_title: Option<String>,
+    pub page: i64,
+    pub page_count: i64,
+    pub position: Option<i64>,
+}
+
+#[derive(uniffi::Record)]
+pub struct HistoryPosition {
+    pub source: String,
+    pub work: String,
+    pub chapter_title: Option<String>,
+    pub page_count: i64,
+    pub position: Option<i64>,
+    pub time_ms: i64,
 }
 
 #[derive(Deserialize)]
@@ -105,6 +147,35 @@ pub(crate) fn asset(dir: &Path, relative: &str) -> Result<PathBuf, StorageError>
 
 #[uniffi::export]
 impl ProgressStore {
+    pub fn history_positions(&self) -> Result<Vec<HistoryPosition>, StorageError> {
+        let db = self.lock()?;
+        let mut query = db.prepare("SELECT source,work_id,chapter_title,page_count,position,time FROM history ORDER BY time DESC,source,work_id")?;
+        let rows = query.query_map([], |r| Ok(HistoryPosition {
+            source: r.get(0)?, work: r.get(1)?, chapter_title: r.get(2)?,
+            page_count: r.get(3)?, position: r.get(4)?, time_ms: r.get(5)?,
+        }))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn remove_history_positions(&self, entries: Vec<HistoryPosition>) -> Result<(), StorageError> {
+        let mut db = self.lock()?;
+        let tx = db.transaction()?;
+        {
+            let mut remove = tx.prepare("DELETE FROM history WHERE source=? AND work_id=? AND time=?")?;
+            for item in entries {
+                remove.execute(params![item.source, item.work, item.time_ms])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn detail_resume(&self, source: String, work: String) -> Result<Option<DetailResume>, StorageError> {
+        Ok(self.lock()?.query_row("SELECT chapter_id,chapter_title,page,page_count,position FROM history WHERE source=? AND work_id=?",
+            params![source, work], |r| Ok(DetailResume {chapter_id:r.get(0)?, chapter_title:r.get(1)?,
+                page:r.get::<_,Option<i64>>(2)?.unwrap_or(0), page_count:r.get::<_,Option<i64>>(3)?.unwrap_or(0), position:r.get(4)?})).optional()?)
+    }
+
     pub fn last_read_chapter(&self, source: String, work: String) -> Result<Option<String>, StorageError> {
         Ok(self.lock()?.query_row("SELECT chapter_id FROM history WHERE source=? AND work_id=?",
             params![source, work],|row|row.get::<_,Option<String>>(0)).optional()?.flatten())
@@ -145,6 +216,7 @@ impl ProgressStore {
         )?;
         let mut rows = query.query([])?;
         let mut works = Vec::new();
+        let mut active = None;
         while let Some(row) = rows.next()? {
             let source: String = row.get(1)?;
             let work_id: String = row.get(2)?;
@@ -163,7 +235,10 @@ impl ProgressStore {
                         title = Some(d.item.title);
                     }
                     pending_deletion = d.deleting_chapters;
-                    download_status = Some(d.status);
+                    download_status = Some(if matches!(d.status, 0 | 1) {
+                        if active.is_none() { active = Some(park_storage::downloads::ActiveDownloads::read(&self.root)?); }
+                        i32::from(active.as_ref().is_some_and(|owners| owners.contains(&source, &work_id)))
+                    } else { d.status });
                     (d.media, true, chapters)
                 } else {
                     invalid_download = true;
@@ -232,13 +307,59 @@ impl ProgressStore {
         Ok(park_storage::library::updates::view(&db,category)?.to_string())
     }
 
+    pub fn enqueue_favorite_updates(&self, entries: Vec<ChapterKey>, source_kinds: std::collections::HashMap<String,String>,
+                                    directory: String) -> Result<(),StorageError> {
+        use std::collections::BTreeMap;
+        let mut groups = BTreeMap::<(String,String),Vec<String>>::new();
+        for key in entries {
+            groups.entry((key.source,key.work_id)).or_default().push(key.chapter_id);
+        }
+        let now = crate::tavern::now()?;
+        let mut conn = self.lock()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        for ((source,work), chapters) in groups {
+            let raw: String = tx.query_row("SELECT json FROM works WHERE source=? AND id=? AND favorite=1",
+                params![source,work], |row|row.get(0)).optional()?.ok_or(StorageError::InvalidDownload)?;
+            let item: serde_json::Value = serde_json::from_str(&raw).map_err(|_|StorageError::InvalidDownload)?;
+            if item["id"].as_str()!=Some(work.as_str()) || item["source"].as_str().is_some_and(|value| value!=source) {
+                return Err(StorageError::InvalidDownload);
+            }
+            let media = item["mediaKind"].as_str().filter(|v| !v.is_empty())
+                .or_else(||source_kinds.get(&source).map(String::as_str)).ok_or(StorageError::InvalidDownload)?;
+            let mut selected = Vec::with_capacity(chapters.len());
+            for chapter in chapters {
+                let title: String = tx.query_row("SELECT c.title FROM chapters c JOIN works w ON w.id=c.work_id AND w.source=c.source
+                    WHERE c.source=? AND c.work_id=? AND c.chapter_id=? AND c.date_fetch>COALESCE(w.favorited_at,0)",
+                    params![source,work,chapter], |row|row.get(0)).optional()?.ok_or(StorageError::InvalidDownload)?;
+                selected.push(serde_json::json!({"id":chapter,"title":title}));
+            }
+            park_storage::downloads::enqueue_chapters(&tx,&source,&item,&selected,Path::new(&directory),media,None,now)?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn download_chapters(&self, source: String, work: String) -> Result<Vec<OfflineChapter>, StorageError> {
+        Ok(self.download_row_info(source, work)?.chapters)
+    }
+
+    pub fn download_row_info(&self, source: String, work: String) -> Result<DownloadRowInfo, StorageError> {
         let raw: String = self.lock()?.query_row(
             "SELECT json FROM download_tasks WHERE source=? AND uid=?",
             params![source, format!("{source}:{work}")], |row| row.get(0),
         ).optional()?.ok_or(StorageError::UnavailableDownload)?;
         let task = Download::from_record(&raw, &source, &work).ok_or(StorageError::InvalidDownload)?;
-        Ok(task.chapters)
+        let record: serde_json::Value = serde_json::from_str(&raw).map_err(|_| StorageError::InvalidDownload)?;
+        let status = if matches!(task.status, 0 | 1) {
+            i32::from(park_storage::downloads::ActiveDownloads::read(&self.root)?.contains(&source, &work))
+        } else {
+            task.status
+        };
+        Ok(DownloadRowInfo {
+            status, chapters: task.chapters, completed: task.completed,
+            done: record["done"].as_u64().unwrap_or(0), total: record["total"].as_u64().unwrap_or(0),
+            bytes: record["bytes"].as_u64().unwrap_or(0), error: record["error"].as_str().map(str::to_owned),
+        })
     }
 
     pub fn remove_invalid_download(&self, source: String, work: String) -> Result<(), StorageError> {
@@ -270,6 +391,27 @@ impl ProgressStore {
         Ok(park_storage::downloads::change_status(
             &mut db, &source, &work, resume,
         )?)
+    }
+
+    pub fn change_download_queue(&self, targets: Vec<DownloadTarget>, resume: bool) -> Result<Vec<DownloadTarget>, StorageError> {
+        let keys = targets.into_iter().map(|t| (t.source, t.work)).collect::<Vec<_>>();
+        let changed = park_storage::downloads::change_queue_batch(&mut *self.lock()?, &keys, resume)?;
+        Ok(changed.into_iter().map(|(source, work)| DownloadTarget { source, work }).collect())
+    }
+
+    pub fn detail_download_task(&self, source: String, work: String) -> Result<Option<DetailDownloadTask>, StorageError> {
+        let row: Option<(String, i64)> = self.lock()?.query_row(
+            "SELECT json,created_at FROM download_tasks WHERE source=? AND uid=?",
+            params![source,format!("{source}:{work}")], |r| Ok((r.get(0)?,r.get(1)?)),
+        ).optional()?;
+        row.map(|(raw,created_at)| {
+            let task = Download::from_record(&raw,&source,&work).ok_or(StorageError::InvalidDownload)?;
+            Ok(DetailDownloadTask {created_at, completed:task.status == 3})
+        }).transpose()
+    }
+
+    pub fn delete_confirmed_download(&self, source: String, work: String, created_at: i64) -> Result<bool, StorageError> {
+        Ok(park_storage::downloads::delete_confirmed(&mut *self.lock()?, &source, &work, created_at)?)
     }
 
     pub fn delete_download(

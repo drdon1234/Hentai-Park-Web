@@ -68,13 +68,7 @@ pub fn save_classified_summary(
         }
     }
     if let Some(categories) = categories {
-        tx.execute("DELETE FROM work_categories WHERE source=? AND work_id=?", params![source,id])?;
-        for category in categories {
-            if tx.execute("INSERT INTO work_categories(source,work_id,category_id)
-                SELECT ?,?,id FROM categories WHERE id=?", params![source,id,category])? != 1 {
-                return Err(rusqlite::Error::QueryReturnedNoRows);
-            }
-        }
+        replace_categories(&tx, source, id, categories)?;
     }
     let current = tx.query_row(
         "SELECT favorite FROM works WHERE source=? AND id=?",
@@ -85,7 +79,18 @@ pub fn save_classified_summary(
     Ok(current)
 }
 
-fn upsert_summary<'a>(tx:&Transaction<'_>,source:&str,detail:&'a Value) -> rusqlite::Result<&'a str> {
+pub fn replace_categories(tx: &Transaction<'_>, source: &str, id: &str, categories: &[i64]) -> rusqlite::Result<()> {
+    tx.execute("DELETE FROM work_categories WHERE source=? AND work_id=?", params![source,id])?;
+    for category in categories {
+        if tx.execute("INSERT INTO work_categories(source,work_id,category_id)
+            SELECT ?,?,id FROM categories WHERE id=?", params![source,id,category])? != 1 {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+    }
+    Ok(())
+}
+
+pub fn upsert_summary<'a>(tx:&Transaction<'_>,source:&str,detail:&'a Value) -> rusqlite::Result<&'a str> {
     let id = detail["id"]
         .as_str()
         .filter(|v| !v.is_empty())

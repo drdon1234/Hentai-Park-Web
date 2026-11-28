@@ -1,6 +1,7 @@
 import Foundation
 
 public extension Notification.Name {
+    static let parkReaderModeChanged = Notification.Name("ParkReaderModeChanged")
     static let parkFavoritesChanged = Notification.Name("ParkFavoritesChanged")
 }
 
@@ -34,6 +35,28 @@ public struct LibraryPrivacy: Decodable, Sendable {
     public var permitsSubscriptionNotification: Bool {
         adultConfirmed == true && subscriptionNotifications == true && incognito != true
     }
+}
+
+public enum ComicReadingMode: Int32, CaseIterable, Decodable, Sendable {
+    case vertical, leftToRight, rightToLeft
+
+    public var label: String {
+        switch self {
+        case .vertical: return "上下滚动（条漫）"
+        case .leftToRight: return "左右翻页（从左到右）"
+        case .rightToLeft: return "左右翻页（日漫，从右到左）"
+        }
+    }
+}
+
+public struct ComicReadingSettings: Sendable {
+    public let workMode: ComicReadingMode?
+    public let defaultMode: ComicReadingMode
+    public var effective: ComicReadingMode { workMode ?? defaultMode }
+}
+
+private struct ComicDefaults: Decodable, Sendable {
+    var readerMode: Int32?
 }
 
 public struct NovelPreferences: Decodable, Sendable {
@@ -112,6 +135,28 @@ public actor ProgressSession {
         try await run { store, _ in try store.deleteReadDownloads() }
     }
 
+    public func comicReadingSettings(_ key: ChapterKey) async throws -> ComicReadingSettings {
+        let defaults = try await preferences(ComicDefaults.self)
+        let stored = try await run { store, _ in try store.readerMode(key: key) }
+        return ComicReadingSettings(workMode: stored.flatMap(ComicReadingMode.init(rawValue:)),
+            defaultMode: defaults.readerMode.flatMap(ComicReadingMode.init(rawValue:)) ?? .vertical)
+    }
+
+    public func setComicMode(_ key: ChapterKey, mode: ComicReadingMode?) async throws {
+        try await run { store, _ in try store.setReaderMode(key: key, mode: mode?.rawValue) }
+        await MainActor.run { NotificationCenter.default.post(name: .parkReaderModeChanged, object: nil) }
+    }
+
+    public func promoteComicMode(_ key: ChapterKey) async throws {
+        try await run { store, _ in
+            guard let raw = try store.readerMode(key: key), ComicReadingMode(rawValue: raw) != nil else {
+                throw CocoaError(.coderInvalidValue)
+            }
+            try store.savePreference(name: "readerMode", json: String(raw))
+        }
+        await MainActor.run { NotificationCenter.default.post(name: .parkReaderModeChanged, object: nil) }
+    }
+
     public func novelSettings() async throws -> NovelPreferences {
         try await preferences(NovelPreferences.self)
     }
@@ -154,13 +199,12 @@ public actor ProgressSession {
         try await run { store, _ in try store.saveDiscoveryScope(dimension: dimension, media: media) }
     }
 
-    public func completeOnboarding(categories: [String], secureScreen: Bool, appLock: Bool, blurCovers: Bool = false) async throws {
+    public func completeOnboarding(categories: [String], secureScreen: Bool, blurCovers: Bool = false) async throws {
         let json = String(decoding: try JSONEncoder().encode(categories), as: UTF8.self)
         try await run { store, _ in
             try store.savePreference(name: "homeCategories", json: json)
             try store.savePreference(name: "blurCovers", json: blurCovers ? "true" : "false")
             try store.savePreference(name: "secureScreen", json: secureScreen ? "true" : "false")
-            try store.savePreference(name: "appLock", json: appLock ? "true" : "false")
             try store.savePreference(name: "onboarded", json: "true")
         }
     }
@@ -171,6 +215,17 @@ public actor ProgressSession {
 
     public func shelfCategories() async throws -> [LibraryCategory] {
         try await run { store, _ in try store.libraryCategories(source: nil, work: nil) }
+    }
+
+    public func downloadCategories(_ work: LibraryWork) async throws -> [LibraryCategory] {
+        try await run { store, _ in try store.libraryCategories(source: work.source, work: work.workId) }
+    }
+
+    public func editDownloadCategories(_ work: LibraryWork, added: [Int64], removed: [Int64]) async throws {
+        try await run { store, _ in
+            try store.editDownloadCategories(source: work.source, work: work.workId, chapter: nil, added: added, removed: removed)
+        }
+        await Self.favoritesChanged([])
     }
 
     public func isFavorite(source: String, work: String) async throws -> Bool {

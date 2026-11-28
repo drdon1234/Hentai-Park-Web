@@ -8,6 +8,43 @@ use tempfile::NamedTempFile;
 pub struct DownloadSlot {
     _lease: NamedTempFile,
 }
+#[derive(Default)]
+pub struct ActiveDownloads(BTreeSet<String>);
+impl ActiveDownloads {
+    /// 进程退出会释放文件锁。共享锁只用来区分遗留文件与正在执行的任务。
+    pub fn read(root: &Path) -> Result<Self> {
+        let dir = root.join("download_workers");
+        let gate = match OpenOptions::new().read(true).open(dir.join("queue.lock")) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(_) => return Err(Error::Unavailable),
+        };
+        FileExt::lock_shared(&gate).map_err(|_| Error::Unavailable)?;
+        let mut owners = BTreeSet::new();
+        for entry in fs::read_dir(dir).map_err(|_| Error::Unavailable)? {
+            let entry = entry.map_err(|_| Error::Unavailable)?;
+            let name = entry.file_name();
+            let Some((owner, _)) = name.to_str().and_then(|s| s.strip_prefix("active-")).and_then(|s| s.rsplit_once('-')) else { continue };
+            if !entry.file_type().map_err(|_| Error::Unavailable)?.is_file() {
+                return Err(Error::Invalid);
+            }
+            let file = match OpenOptions::new().read(true).open(entry.path()) {
+                Ok(file) => file,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => return Err(Error::Unavailable),
+            };
+            if !crate::recovery::try_lock_file(&file, false).map_err(|_| Error::Unavailable)? {
+                owners.insert(owner.to_owned());
+            }
+        }
+        Ok(Self(owners))
+    }
+
+    pub fn contains(&self, source: &str, work: &str) -> bool {
+        !self.0.is_empty() && self.0.contains(&format!("{}-{}", hash(source), hash(work)))
+    }
+}
+
 impl DownloadSlot {
     pub fn acquire(
         root: &Path,
@@ -187,13 +224,43 @@ pub fn change_status(db: &mut Connection, source: &str, work: &str, resume: bool
     if !matches!(t["status"].as_i64(), Some(0 | 1 | 2 | 4)) || !t["deletingChapters"].is_null() {
         return Err(Error::Invalid);
     }
+    write_queue_status(&tx, &uid, &mut t, resume)?;
+    Ok(tx.commit()?)
+}
+
+fn write_queue_status(tx: &rusqlite::Transaction<'_>, uid: &str, t: &mut Value, resume: bool) -> Result<()> {
     t["status"] = Value::from(if resume { 0 } else { 2 });
     t["error"] = Value::Null;
     tx.execute(
         "UPDATE download_tasks SET json=? WHERE uid=?",
         params![t.to_string(), uid],
     )?;
-    Ok(tx.commit()?)
+    Ok(())
+}
+
+/// 在同一事务中重新核实每项状态，陈旧窗口不能重新启动已完成的下载。
+pub fn change_queue_batch(db: &mut Connection, targets: &[(String, String)], resume: bool) -> Result<Vec<(String, String)>> {
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let mut changed = Vec::new();
+    for (source, work) in targets {
+        let uid = format!("{source}:{work}");
+        let mut item = match task(&tx, &uid, source, work) {
+            Ok((_, item)) => item,
+            Err(Error::Unavailable) => continue,
+            Err(other) => return Err(other),
+        };
+        let eligible = match item["status"].as_i64() {
+            Some(0 | 1) => !resume,
+            Some(2 | 4) => resume,
+            _ => false,
+        };
+        if eligible && item["deletingChapters"].is_null() {
+            write_queue_status(&tx, &uid, &mut item, resume)?;
+            changed.push((source.clone(), work.clone()));
+        }
+    }
+    tx.commit()?;
+    Ok(changed)
 }
 pub fn record_failure(db: &mut Connection, source: &str, work: &str, selection: Option<&Value>) -> Result<bool> {
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;

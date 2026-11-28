@@ -9,7 +9,7 @@ pub mod settings;
 pub mod tavern;
 pub mod tavern_chat;
 pub mod tavern_proposal;
-pub use filter::BlockFilter;
+pub use filter::{BlockFilter, BLOCK_VOCABULARY};
 pub use language::{normalized_search_text, LocalizedCopy, PUBLIC_CONTRACT};
 pub use novel::translation_segments;
 pub use novel::{NovelMode, NovelText};

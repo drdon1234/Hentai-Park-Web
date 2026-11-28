@@ -1,7 +1,7 @@
 mod desktop;
 pub use desktop::{import_desktop, save_desktop};
 mod archive;
-pub use archive::{add_blocked_tag, automatic_if_due, save, set_preferences};
+pub use archive::{add_blocked_tag, automatic_if_due, block_library_item, ignore_dictionary_reminder, remember_game_reply, save, set_home_membership, set_preferences};
 mod encode;
 mod import;
 pub use import::Import;

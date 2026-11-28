@@ -375,7 +375,7 @@
     {
       "key": "xhamster",
       "name": "xHamster",
-      "version": "0.0.2",
+      "version": "0.0.3",
       "type": "video",
       "category": "adult",
       "file": "xhamster.js",
@@ -415,7 +415,7 @@
     {
       "key": "thumbzilla",
       "name": "Thumbzilla",
-      "version": "0.0.11",
+      "version": "0.0.12",
       "type": "video",
       "category": "adult",
       "file": "thumbzilla.js",
@@ -625,7 +625,7 @@
     {
       "key": "cam4",
       "name": "CAM4",
-      "version": "0.0.9",
+      "version": "0.0.10",
       "type": "video",
       "category": "live",
       "file": "cam4.js",
@@ -864,7 +864,7 @@
       "key": "lushstories",
       "name": "Lush Stories",
       "description": "英文小说社区，支持推荐、搜索与正文阅读",
-      "version": "0.0.8",
+      "version": "0.0.9",
       "type": "novel",
       "category": "novel",
       "file": "lushstories.js",

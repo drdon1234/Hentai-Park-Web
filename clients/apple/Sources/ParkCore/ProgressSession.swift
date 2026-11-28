@@ -2,7 +2,42 @@ import Foundation
 
 public extension Notification.Name {
     static let parkReaderModeChanged = Notification.Name("ParkReaderModeChanged")
+    static let parkHistoryChanged = Notification.Name("ParkHistoryChanged")
     static let parkFavoritesChanged = Notification.Name("ParkFavoritesChanged")
+}
+
+/// 一个进程的认证状态。窗口返回时按单调时钟计算，取消后只接受显式重试。
+public struct LibraryLockState: Sendable {
+    public private(set) var locked = true
+    private var automatic = false
+    private var away: TimeInterval?
+    public init() {}
+
+    public mutating func load(enabled: Bool) {
+        locked = enabled
+        automatic = enabled
+        away = nil
+    }
+
+    public mutating func leave(at time: TimeInterval) {
+        if away == nil { away = time }
+    }
+
+    public mutating func resume(at time: TimeInterval, grace: Int) {
+        defer { away = nil }
+        if !locked, let away, time - away >= Double(max(0, grace)) {
+            locked = true
+            automatic = true
+        }
+    }
+
+    public mutating func takeAutomaticPrompt() -> Bool {
+        guard locked && automatic else { return false }
+        automatic = false
+        return true
+    }
+
+    public mutating func authenticated() { load(enabled: false) }
 }
 
 public struct LibraryPrivacy: Decodable, Sendable {
@@ -14,12 +49,17 @@ public struct LibraryPrivacy: Decodable, Sendable {
     public let secureScreen: Bool?
     public let blurCovers: Bool?
     public let language: String?
+    public let themeMode: Int?
+    public let seedColor: UInt32?
+    public let autoTranslateContent: Bool?
     public let subscriptionUpdateHours: Int?
     public let subscriptionNotifications: Bool?
     public let subscriptionNotificationPreview: Bool?
     public let homeCategories: [String]?
     public let homeDimension: String?
     public let homeMedia: String?
+    public let homeExpandedDomains, homeHiddenSources: [String]?
+    public let dataSavingMode: String?
     public let domainOrder: [String]?
     public let proxy: String?
 
@@ -57,6 +97,131 @@ public struct ComicReadingSettings: Sendable {
 
 private struct ComicDefaults: Decodable, Sendable {
     var readerMode: Int32?
+}
+
+public struct ComicAppearance: Decodable, Equatable, Sendable {
+    public var background: String
+    public var showPageNumber: Bool
+    public var keepAwake: Bool
+    public var orientation: String
+    public var dim: Double
+    public var warmth: Double
+    public var gray: Bool
+    public var inverted: Bool
+    public var gap: Double
+    public var animated: Bool
+    public var dual: String
+    public var coverSingle: Bool
+    public var splitWide: Bool
+    public var crop: Bool
+    public var tapEnabled: Bool
+    public var tapLayout: Int
+    public var invertH: Bool
+    public var invertV: Bool
+
+    private enum Keys: String, CodingKey {
+        case readerBackground, readerShowPageNumber, keepScreenOn, readerOrientation, readerDim, readerWarm, readerGrayscale, readerInvert
+        case readerGap, readerAnimate, readerDual, readerCoverSingle, readerSplitWide, readerCrop
+        case tapToPage, readerTapLayout, readerTapInvertH, readerTapInvertV
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: Keys.self)
+        background = try values.decodeIfPresent(String.self, forKey: .readerBackground) ?? "black"
+        showPageNumber = try values.decodeIfPresent(Bool.self, forKey: .readerShowPageNumber) ?? true
+        keepAwake = try values.decodeIfPresent(Bool.self, forKey: .keepScreenOn) ?? true
+        orientation = try values.decodeIfPresent(String.self, forKey: .readerOrientation) ?? "auto"
+        dim = try values.decodeIfPresent(Double.self, forKey: .readerDim) ?? 0
+        warmth = try values.decodeIfPresent(Double.self, forKey: .readerWarm) ?? 0
+        gray = try values.decodeIfPresent(Bool.self, forKey: .readerGrayscale) ?? false
+        inverted = try values.decodeIfPresent(Bool.self, forKey: .readerInvert) ?? false
+        gap = try values.decodeIfPresent(Double.self, forKey: .readerGap) ?? 0
+        animated = try values.decodeIfPresent(Bool.self, forKey: .readerAnimate) ?? true
+        dual = try values.decodeIfPresent(String.self, forKey: .readerDual) ?? "off"
+        coverSingle = try values.decodeIfPresent(Bool.self, forKey: .readerCoverSingle) ?? true
+        splitWide = try values.decodeIfPresent(Bool.self, forKey: .readerSplitWide) ?? false
+        crop = try values.decodeIfPresent(Bool.self, forKey: .readerCrop) ?? false
+        tapEnabled = try values.decodeIfPresent(Bool.self, forKey: .tapToPage) ?? true
+        tapLayout = try values.decodeIfPresent(Int.self, forKey: .readerTapLayout) ?? 0
+        invertH = try values.decodeIfPresent(Bool.self, forKey: .readerTapInvertH) ?? false
+        invertV = try values.decodeIfPresent(Bool.self, forKey: .readerTapInvertV) ?? false
+    }
+
+    public mutating func resetFilters() {
+        dim = 0; warmth = 0; gray = false; inverted = false
+    }
+
+    fileprivate func patch(from original: Self) throws -> String {
+        var changed: [String: Any] = [:]
+        if background != original.background { changed["readerBackground"] = background }
+        if showPageNumber != original.showPageNumber { changed["readerShowPageNumber"] = showPageNumber }
+        if keepAwake != original.keepAwake { changed["keepScreenOn"] = keepAwake }
+        if orientation != original.orientation { changed["readerOrientation"] = orientation }
+        if dim != original.dim { changed["readerDim"] = dim }
+        if warmth != original.warmth { changed["readerWarm"] = warmth }
+        if gray != original.gray { changed["readerGrayscale"] = gray }
+        if inverted != original.inverted { changed["readerInvert"] = inverted }
+        if gap != original.gap { changed["readerGap"] = gap }
+        if animated != original.animated { changed["readerAnimate"] = animated }
+        if dual != original.dual { changed["readerDual"] = dual }
+        if coverSingle != original.coverSingle { changed["readerCoverSingle"] = coverSingle }
+        if splitWide != original.splitWide { changed["readerSplitWide"] = splitWide }
+        if crop != original.crop { changed["readerCrop"] = crop }
+        if tapEnabled != original.tapEnabled { changed["tapToPage"] = tapEnabled }
+        if tapLayout != original.tapLayout { changed["readerTapLayout"] = tapLayout }
+        if invertH != original.invertH { changed["readerTapInvertH"] = invertH }
+        if invertV != original.invertV { changed["readerTapInvertV"] = invertV }
+        return String(decoding: try JSONSerialization.data(withJSONObject: changed), as: UTF8.self)
+    }
+}
+
+public struct ComicSpread: Equatable, Sendable {
+    public enum Half: Sendable { case left, right }
+    public let first: Int32
+    public let second: Int32?
+    public let half: Half?
+
+    public static func pages(aspects: [Double], dual: Bool, coverSingle: Bool, splitWide: Bool, rtl: Bool) -> [Self] {
+        var spreads = [Self]()
+        var index = 0
+        while index < aspects.count {
+            let page = Int32(index)
+            if dual && !(index == 0 && coverSingle) && aspects[index] <= 1 &&
+                index + 1 < aspects.count && aspects[index + 1] <= 1 {
+                spreads.append(Self(first: page, second: page + 1, half: nil))
+                index += 2
+            } else {
+                if !dual && splitWide && aspects[index] > 1 {
+                    spreads.append(Self(first: page, second: nil, half: rtl ? .right : .left))
+                    spreads.append(Self(first: page, second: nil, half: rtl ? .left : .right))
+                } else {
+                    spreads.append(Self(first: page, second: nil, half: nil))
+                }
+                index += 1
+            }
+        }
+        return spreads
+    }
+}
+
+extension ComicAppearance {
+    public enum TapResult { case previous, next, controls }
+    public func tap(x: Double, y: Double, mode: ComicReadingMode) -> TapResult {
+        guard tapEnabled else { return .controls }
+        let horizontal = (mode == .rightToLeft) != invertH ? 1 - x : x
+        let vertical = invertV ? 1 - y : y
+        let middle = (1.0 / 3)...(2.0 / 3)
+        let left = horizontal < middle.lowerBound, top = vertical < middle.lowerBound
+        switch tapLayout == 0 ? (mode == .vertical ? 2 : 1) : tapLayout {
+        case 1: return left ? .previous : horizontal > middle.upperBound ? .next : .controls
+        case 2:
+            if middle.contains(horizontal) && middle.contains(vertical) { return .controls }
+            return top || left && vertical <= middle.upperBound ? .previous : .next
+        case 3: return top ? .controls : left ? .previous : .next
+        case 4: return !middle.contains(horizontal) ? .next : vertical > middle.upperBound ? .previous : .controls
+        default: return .controls
+        }
+    }
 }
 
 public struct NovelPreferences: Decodable, Sendable {
@@ -157,6 +322,15 @@ public actor ProgressSession {
         await MainActor.run { NotificationCenter.default.post(name: .parkReaderModeChanged, object: nil) }
     }
 
+    public func comicAppearance() async throws -> ComicAppearance { try await preferences(ComicAppearance.self) }
+
+    public func saveComicAppearance(_ values: ComicAppearance, from original: ComicAppearance) async throws {
+        guard original != values else { return }
+        let json = try values.patch(from: original)
+        try await run { store, _ in try store.saveReaderPreferences(json: json) }
+        await MainActor.run { NotificationCenter.default.post(name: .parkReaderModeChanged, object: nil) }
+    }
+
     public func novelSettings() async throws -> NovelPreferences {
         try await preferences(NovelPreferences.self)
     }
@@ -188,9 +362,23 @@ public actor ProgressSession {
         try await run { store, _ in try store.savePreference(name: name, json: enabled ? "true" : "false") }
     }
 
+    public static func proxySummary(_ value: String) -> String? {
+        guard !value.contains(where: { $0.isWhitespace || $0 == "\\" }),
+              let url = URLComponents(string: value.contains("://") ? value : "http://" + value),
+              ["http","https"].contains(url.scheme?.lowercased() ?? ""), url.user == nil, url.password == nil,
+              let host = url.host, !host.isEmpty, url.url != nil,
+              let port = url.port, (1...65535).contains(port),
+              url.path.isEmpty || url.path == "/", url.query == nil, url.fragment == nil else { return nil }
+        return host + ":" + String(port)
+    }
+
     public func setPreference(_ name: String, json: String) async throws {
-        guard ["language", "homeCategories", "domainOrder", "proxy", "appLockAfter", "subscriptionUpdateHours", "onboarded"].contains(name) else {
+        guard ["language", "themeMode", "seedColor", "autoTranslateContent", "homeCategories", "domainOrder", "proxy", "appLockAfter", "subscriptionUpdateHours", "onboarded"].contains(name) else {
             throw CocoaError(.coderInvalidValue)
+        }
+        if name == "proxy" {
+            let value = try JSONDecoder().decode(String.self, from: Data(json.utf8))
+            guard value.isEmpty || Self.proxySummary(value) != nil else { throw CocoaError(.coderInvalidValue) }
         }
         try await run { store, _ in try store.savePreference(name: name, json: json) }
     }
@@ -199,18 +387,41 @@ public actor ProgressSession {
         try await run { store, _ in try store.saveDiscoveryScope(dimension: dimension, media: media) }
     }
 
+    public func setHomeDomain(_ domain: String, expanded: Bool) async throws -> [String] {
+        try await run { store, _ in try store.setHomeMembership(name: "homeExpandedDomains", entry: domain, enabled: expanded) }
+    }
+
+    public func setHomeSite(_ source: String, visible: Bool) async throws -> [String] {
+        try await run { store, _ in try store.setHomeMembership(name: "homeHiddenSources", entry: source, enabled: !visible) }
+    }
+
     public func completeOnboarding(categories: [String], secureScreen: Bool, blurCovers: Bool = false) async throws {
-        let json = String(decoding: try JSONEncoder().encode(categories), as: UTF8.self)
         try await run { store, _ in
-            try store.savePreference(name: "homeCategories", json: json)
-            try store.savePreference(name: "blurCovers", json: blurCovers ? "true" : "false")
-            try store.savePreference(name: "secureScreen", json: secureScreen ? "true" : "false")
-            try store.savePreference(name: "onboarded", json: "true")
+            try store.completeOnboarding(categories: categories, secureScreen: secureScreen, blurCovers: blurCovers)
         }
     }
 
     public func libraryWorks() async throws -> [LibraryWork] {
         try await run { store, _ in try store.libraryWorks() }
+    }
+
+    public func removeHistory(_ works: [LibraryWork]) async throws {
+        let entries = works.compactMap { work -> HistoryPosition? in
+            guard let time = work.historyMs else { return nil }
+            return HistoryPosition(source: work.source, work: work.workId, chapterTitle: nil, pageCount: 0,
+                                   position: nil, timeMs: time)
+        }
+        try await run { store, _ in try store.removeHistoryPositions(entries: entries) }
+        await MainActor.run { NotificationCenter.default.post(name: .parkHistoryChanged, object: nil) }
+    }
+
+    public func historyGrid() async throws -> Bool {
+        struct Layout: Decodable, Sendable { let historyDisplay: String? }
+        return try await preferences(Layout.self).historyDisplay == "grid"
+    }
+
+    public func setHistoryGrid(_ enabled: Bool) async throws {
+        try await run { store, _ in try store.savePreference(name: "historyDisplay", json: enabled ? "\"grid\"" : "\"list\"") }
     }
 
     public func shelfCategories() async throws -> [LibraryCategory] {
@@ -246,6 +457,18 @@ public actor ProgressSession {
 
     public func shelfPreferences() async throws -> ShelfPreferences {
         try await preferences(ShelfPreferences.self)
+    }
+
+    public func shelfGrid() async throws -> Bool {
+        struct Layout: Decodable, Sendable { let libraryDisplay: String? }
+        return try await preferences(Layout.self).libraryDisplay != "list"
+    }
+
+    public func setShelfGrid(_ enabled: Bool) async throws {
+        try await run { store, _ in
+            try store.savePreference(name: "libraryDisplay", json: enabled ? "\"grid\"" : "\"list\"")
+        }
+        await Self.favoritesChanged([])
     }
 
     public func saveShelfOptions(_ options: ShelfPreferences) async throws {
@@ -301,8 +524,8 @@ public actor ProgressSession {
         try await run { store, _ in try store.savePreference(name: "novelFontSize", json: String(size)) }
     }
 
-    public func pageImage(_ images: ChapterImages, index: Int32) async throws -> PageImage {
-        try await run { _, request in try images.image(index: index, crop: false, preload: false, request: request) }
+    public func pageImage(_ images: ChapterImages, index: Int32, crop: Bool = false) async throws -> PageImage {
+        try await run { _, request in try images.image(index: index, crop: crop, preload: false, request: request) }
     }
 
     public func turnPage(_ turn: PageTurn) async throws -> ChapterProgress {

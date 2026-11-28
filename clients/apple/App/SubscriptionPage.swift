@@ -7,6 +7,10 @@ import SwiftUI
   let incognito: Bool
   let tr: (String) -> String
   let back: () -> Void
+  var fromSettings = false
+  @State private var showingRecords = false
+  private var showsTargets: Bool { !fromSettings || !showingRecords }
+  private var showsEvents: Bool { !fromSettings || showingRecords }
   @State private var data: SubscriptionUpdates?
   private struct OpenedUpdate {
     let event: SubscriptionUpdates.Event
@@ -44,10 +48,15 @@ import SwiftUI
       } else {
         VStack(alignment: .leading) {
           HStack {
-            Button(tr("返回"), action: back)
-            Text(tr("订阅更新")).font(.headline)
+            Button(tr("返回")) {
+              if fromSettings && showingRecords {
+                showingRecords = false
+                if !pageStarts.isEmpty { run(page: []) {} }
+              } else { back() }
+            }
+            Text(tr(showsEvents ? "订阅更新" : "订阅")).font(.headline)
             Spacer()
-            if let data, !data.events.isEmpty {
+            if showsEvents, let data, !data.events.isEmpty {
               Menu(tr("管理")) {
                 Button(tr("全部标为已读")) { run { try await session.readAllSubscriptionEvents() } }
                 Button(tr("清空订阅更新"), role: .destructive) { clearingEvents = true }
@@ -56,7 +65,7 @@ import SwiftUI
               .disabled(operation != nil)
             }
           }.padding(.horizontal)
-          if let data, !pageStarts.isEmpty || data.events.count > 100 {
+          if showsEvents, let data, !pageStarts.isEmpty || data.events.count > 100 {
             HStack {
               if !pageStarts.isEmpty {
                 Button(tr("上一页")) { run(page: Array(pageStarts.dropLast())) {} }
@@ -70,92 +79,101 @@ import SwiftUI
           List {
             if let status { Text(tr(status)) }
             if let data {
-              Picker(tr("自动检查订阅"), selection: Binding(get: { hours }, set: setHours)) {
-                ForEach(Array(Set([0, 1, 3, 6, 12, 24, hours])).sorted(), id: \.self) { item in
-                  Text(item == 0 ? tr("关闭") : tr("每 {hours} 小时").replacingOccurrences(of: "{hours}", with: String(item))).tag(item)
-                }
-              }.disabled(operation != nil)
-              #if os(iOS)
-                if scheduler.schedulingFailed { Text(tr("系统未安排后台刷新，仍可手动检查订阅。")) }
-                Toggle(tr("订阅系统通知"), isOn: Binding(get: { notifications }, set: { value in
-                  run {
-                    if value {
-                      let allowed = try await SubscriptionNotifications.shared.requestPermission()
-                      guard allowed else {
-                        status = "需要通知权限才能发送更新提醒"
-                        return
-                      }
-                    }
-                    try await session.setSubscriptionNotifications(value, preview: false)
-                    notifications = value
-                    if value { try await SubscriptionNotifications.shared.deliver(session) }
+              if fromSettings && !showingRecords {
+                Button(tr("订阅更新")) { showingRecords = true }
+              }
+              if showsTargets {
+                Picker(tr("自动检查订阅"), selection: Binding(get: { hours }, set: setHours)) {
+                  ForEach(Array(Set([0, 1, 3, 6, 12, 24, hours])).sorted(), id: \.self) { item in
+                    Text(item == 0 ? tr("关闭") : tr("每 {hours} 小时").replacingOccurrences(of: "{hours}", with: String(item))).tag(item)
                   }
-                })).disabled(operation != nil)
-                if notifications {
-                  Toggle(tr("通知中显示内容标题"), isOn: Binding(get: { preview }, set: { value in
+                }.pickerStyle(.menu).accessibilityIdentifier("subscription-interval").disabled(operation != nil)
+                #if os(iOS)
+                  if scheduler.schedulingFailed { Text(tr("系统未安排后台刷新，仍可手动检查订阅。")) }
+                  Toggle(tr("订阅系统通知"), isOn: Binding(get: { notifications }, set: { value in
                     run {
-                      try await session.setSubscriptionNotifications(value, preview: true)
-                      preview = value
+                      if value {
+                        let allowed = try await SubscriptionNotifications.shared.requestPermission()
+                        guard allowed else {
+                          status = "需要通知权限才能发送更新提醒"
+                          return
+                        }
+                      }
+                      try await session.setSubscriptionNotifications(value, preview: false)
+                      notifications = value
+                      if value { try await SubscriptionNotifications.shared.deliver(session) }
                     }
                   })).disabled(operation != nil)
-                }
-              #endif
-              if operation != nil {
-                Button(tr("取消")) { operation?.cancel() }
-              } else {
-                Button(tr("检查订阅更新")) {
-                  run {
-                    guard let library = InstalledSources.library else { throw SiteReadError.malformed }
-                    if try await !session.checkSubscriptions(library, force: true) {
-                      status = "部分订阅检查失败，请查看订阅状态"
+                  if notifications {
+                    Toggle(tr("通知中显示内容标题"), isOn: Binding(get: { preview }, set: { value in
+                      run {
+                        try await session.setSubscriptionNotifications(value, preview: true)
+                        preview = value
+                      }
+                    })).disabled(operation != nil)
+                  }
+                #endif
+                if operation != nil {
+                  Button(tr("取消")) { operation?.cancel() }
+                } else {
+                  Button(tr("检查订阅更新")) {
+                    run {
+                      guard let library = InstalledSources.library else { throw SiteReadError.malformed }
+                      if try await !session.checkSubscriptions(library, force: true) {
+                        status = "部分订阅检查失败，请查看订阅状态"
+                      }
+                      #if os(iOS)
+                        try await SubscriptionNotifications.shared.deliver(session)
+                      #endif
                     }
-                    #if os(iOS)
-                      try await SubscriptionNotifications.shared.deliver(session)
-                    #endif
                   }
                 }
               }
-              if data.events.isEmpty { Text(tr("暂无订阅更新")) }
-              ForEach(Array(data.events.prefix(100))) { event in
-                HStack {
-                Button {
-                  run {
-                    try await open(event)
-                  }
-                } label: {
-                  VStack(alignment: .leading) {
-                    Text(event.title)
-                    Text(tr(event.unread ? "未读" : "已读")).font(.caption)
-                  }
-                }.buttonStyle(.borderless).disabled(operation != nil)
-                Spacer()
-                Button(role: .destructive) { deletingEvent = event } label: {
-                  Image(systemName: "trash")
-                }.accessibilityLabel(tr("删除订阅更新") + " " + event.title)
-                 .buttonStyle(.borderless).disabled(operation != nil)
-                }
-              }
-              Section(header: Text(tr("订阅状态"))) {
-                Button(tr("添加订阅")) { editor = SubscriptionDraft(original: nil) }
-                if data.targets.isEmpty { Text(tr("还没有订阅")) }
-                ForEach(data.targets) { target in
+              if showsEvents {
+                if data.events.isEmpty { Text(tr("暂无订阅更新")) }
+                ForEach(Array(data.events.prefix(100))) { event in
                   HStack {
-                    VStack(alignment: .leading) {
-                      Text(target.label)
-                      Text(target.error.isEmpty ? tr(target.enabled ? "检查已开启" : "检查已暂停")
-                           : tr("检查失败：{code}").replacingOccurrences(of: "{code}", with: target.error)).font(.caption)
+                  Button {
+                    run {
+                      try await open(event)
                     }
-                    Spacer()
-                    Menu(tr("管理")) {
-                      Button(tr("编辑订阅")) { editor = SubscriptionDraft(original: target) }
-                      Button(tr(target.enabled ? "暂停检查" : "恢复检查")) {
-                        run { try await session.setSubscriptionOption(target.id, check: !target.enabled) }
+                  } label: {
+                    VStack(alignment: .leading) {
+                      Text(event.title)
+                      Text(tr(event.unread ? "未读" : "已读")).font(.caption)
+                    }
+                  }.buttonStyle(.borderless).disabled(operation != nil)
+                  Spacer()
+                  Button(role: .destructive) { deletingEvent = event } label: {
+                    Image(systemName: "trash")
+                  }.accessibilityLabel(tr("删除订阅更新") + " " + event.title)
+                   .buttonStyle(.borderless).disabled(operation != nil)
+                  }
+                }
+              }
+              if showsTargets {
+                Section(header: Text(tr("订阅状态"))) {
+                  Button(tr("添加订阅")) { editor = SubscriptionDraft(original: nil) }
+                  if data.targets.isEmpty { Text(tr("还没有订阅")) }
+                  ForEach(data.targets) { target in
+                    HStack {
+                      VStack(alignment: .leading) {
+                        Text(target.label)
+                        Text(target.error.isEmpty ? tr(target.enabled ? "检查已开启" : "检查已暂停")
+                             : tr("检查失败：{code}").replacingOccurrences(of: "{code}", with: target.error)).font(.caption)
                       }
-                      Button(tr(target.notify ? "关闭此订阅通知" : "开启此订阅通知")) {
-                        run { try await session.setSubscriptionOption(target.id, notify: !target.notify) }
-                      }
-                      Button(tr("移除订阅"), role: .destructive) { removing = target }
-                    }.disabled(operation != nil)
+                      Spacer()
+                      Menu(tr("管理")) {
+                        Button(tr("编辑订阅")) { editor = SubscriptionDraft(original: target) }
+                        Button(tr(target.enabled ? "暂停检查" : "恢复检查")) {
+                          run { try await session.setSubscriptionOption(target.id, check: !target.enabled) }
+                        }
+                        Button(tr(target.notify ? "关闭此订阅通知" : "开启此订阅通知")) {
+                          run { try await session.setSubscriptionOption(target.id, notify: !target.notify) }
+                        }
+                        Button(tr("移除订阅"), role: .destructive) { removing = target }
+                      }.disabled(operation != nil)
+                    }
                   }
                 }
               }
@@ -235,9 +253,7 @@ import SwiftUI
     run {
       try await session.setSubscriptionHours(value)
       hours = value
-      #if os(iOS)
-        await scheduler.schedule(hours: value)
-      #endif
+      await SubscriptionScheduler.shared.schedule(hours: value)
     }
   }
 

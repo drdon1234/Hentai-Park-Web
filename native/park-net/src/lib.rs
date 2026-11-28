@@ -7,7 +7,7 @@ mod read_scope;
 mod session;
 mod transport;
 mod web_player;
-pub use policy::public_address;
+pub use policy::{authorize, public_address};
 pub use read_scope::ReadScope;
 pub use session::{Purpose, Session, Sessions};
 pub use transport::{public_https, Request, Response, Transport, WireResponse};

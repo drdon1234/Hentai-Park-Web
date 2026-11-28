@@ -45,6 +45,8 @@ struct ParkApp: App {
     var body: some Scene {
         WindowGroup {
             ProtectedWindow(access: access).environmentObject(downloads).environmentObject(downloads.recordings)
+                .preferredColorScheme(access.colorScheme)
+                .accentColor(access.privacy?.seedColor.map { Color(parkRGB: $0) })
             #if os(macOS)
                 .environmentObject(desktop)
             #endif
@@ -104,14 +106,17 @@ struct ParkApp: App {
 
 @MainActor private final class LibraryAccess: ObservableObject {
     @Published private(set) var privacy: LibraryPrivacy?
-    @Published private(set) var locked = true
+    @Published private var protection = LibraryLockState()
+    var locked: Bool { protection.locked }
     @Published private(set) var failed = false
     @Published private(set) var busy = false
-    private var away: TimeInterval?
     private var authentication: LAContext?
     private var copy = try? CopyCatalog(locale: Locale.preferredLanguages.first ?? "en", pluginJson: nil)
     func tr(_ key: String) -> String { copy?.text(key: key, params: [:]) ?? key }
     var locale: String { copy?.locale() ?? "en" }
+    var colorScheme: ColorScheme? {
+        switch privacy?.themeMode { case 1: return .light; case 2: return .dark; default: return nil }
+    }
 
     func load(confirmAge: Bool = false) async {
         guard !busy, privacy == nil || confirmAge else { return }
@@ -129,28 +134,23 @@ struct ParkApp: App {
             try Task.checkCancellation()
             let language = settings.language.flatMap { $0.isEmpty || $0 == "system" ? nil : $0 }
             copy = try CopyCatalog(locale: language ?? Locale.preferredLanguages.first ?? "en", pluginJson: nil)
-            locked = settings.appLock == true
+            protection.load(enabled: settings.appLock == true)
             privacy = settings
-            #if os(iOS)
             await SubscriptionScheduler.shared.schedule(hours: settings.subscriptionHours)
-            #endif
         } catch { if !Task.isCancelled { failed = true } }
     }
 
     func transition(_ phase: ScenePhase) {
-        guard privacy?.appLock == true else { return }
         if phase == .active {
-            if let away, ProcessInfo.processInfo.systemUptime - away >= Double(max(0, privacy?.appLockAfter ?? 0)) {
-                locked = true
-            }
-            away = nil
+            guard privacy?.appLock == true else { return }
+            protection.resume(at: ProcessInfo.processInfo.systemUptime, grace: privacy?.appLockAfter ?? 0)
         } else {
             #if os(macOS)
             if phase == .inactive && authentication != nil { return }
             #else
             if phase != .background { return }
             #endif
-            away = away ?? ProcessInfo.processInfo.systemUptime
+            if privacy?.appLock == true { protection.leave(at: ProcessInfo.processInfo.systemUptime) }
             authentication?.invalidate()
             authentication = nil
         }
@@ -178,7 +178,7 @@ struct ParkApp: App {
         defer { busy = false }
         do {
             if name == "appLock", enabled, privacy?.appLock != true {
-                guard try await authenticateOwner() else { failed = true; return }
+                guard try await authenticateOwner(reason: "验证身份以开启应用锁") else { failed = true; return }
             }
             let session = try await ProgressSession.openApplicationLibrary()
             do {
@@ -186,7 +186,7 @@ struct ParkApp: App {
                 privacy = try await session.privacySettings()
             } catch { await session.close(); throw error }
             await session.close()
-        } catch let error as LAError where error.code == .userCancel {
+        } catch let error as LAError where [.userCancel, .systemCancel, .appCancel].contains(error.code) {
             return
         } catch { failed = true }
     }
@@ -225,13 +225,19 @@ struct ParkApp: App {
             await session.close()
         } catch { failed = true }
     }
-    private func authenticateOwner() async throws -> Bool {
+    private func authenticateOwner(reason: String) async throws -> Bool {
         let context = LAContext()
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) else { return false }
         authentication = context
         defer { if authentication === context { authentication = nil } }
-        let accepted = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: tr("验证身份以解锁 HentaiPark"))
-        return accepted && authentication === context && !Task.isCancelled
+        let accepted = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: tr(reason))
+        guard authentication === context, !Task.isCancelled else { throw LAError(.appCancel) }
+        return accepted
+    }
+
+    func unlockWhenActive() async {
+        guard !busy, locked, protection.takeAutomaticPrompt() else { return }
+        await unlock()
     }
 
     func unlock() async {
@@ -240,8 +246,10 @@ struct ParkApp: App {
         busy = true
         defer { busy = false }
         do {
-            if try await authenticateOwner() { locked = false; away = nil }
+            if try await authenticateOwner(reason: "验证身份以解锁 HentaiPark") { protection.authenticated() }
             else { failed = true }
+        } catch let error as LAError where error.code == .userCancel || error.code == .systemCancel || error.code == .appCancel {
+            return
         } catch { failed = true }
     }
 }
@@ -250,6 +258,8 @@ struct ParkApp: App {
     @ObservedObject var access: LibraryAccess
     @EnvironmentObject private var downloads: DownloadQueue
     @State private var windowID = UUID()
+    @State private var group = 0
+    @State private var destination: LibraryDestination?
     @Environment(\.scenePhase) private var phase
     #if os(macOS)
     @EnvironmentObject private var desktop: DesktopActivation
@@ -261,6 +271,11 @@ struct ParkApp: App {
     @State private var captured = true
     @State private var sceneIdentifier: String?
     #endif
+    private func tryAutomaticUnlock() {
+        guard phase == .active else { return }
+        Task { await access.unlockWhenActive() }
+    }
+
     var body: some View {
         Group {
             if let settings = access.privacy {
@@ -275,13 +290,19 @@ struct ParkApp: App {
                         Text(access.tr("HentaiPark 已锁定"))
                         Button(access.tr(access.failed ? "重试" : "解锁")) { Task { await access.unlock() } }.disabled(access.busy)
                     }
+                    .onAppear { tryAutomaticUnlock() }
+                    .onChange(of: phase) { _ in tryAutomaticUnlock() }
+                    .onChange(of: access.busy) { _ in tryAutomaticUnlock() }
                 } else if settings.onboarded != true {
+                    let obscured = (inactive || captured) && (settings.secureScreen == true || settings.appLock == true)
                     AppleOnboardingPanel(access: access)
+                        .opacity(obscured ? 0 : 1).accessibilityHidden(obscured).allowsHitTesting(!obscured)
                 } else {
                     let hide = (inactive && (settings.secureScreen == true || settings.appLock == true))
-                        || (captured && settings.secureScreen == true)
-                    LibraryWindow(access: access)
+                        || (captured && (settings.secureScreen == true || settings.appLock == true))
+                    LibraryWindow(access: access, group: $group, destination: $destination)
                         .environment(\.blurCovers, settings.blurCovers == true)
+                        .environment(\.autoTranslateContent, settings.autoTranslateContent == true)
                         .environment(\.privacyObscured,hide)
                         .opacity(hide ? 0 : 1).accessibilityHidden(hide).allowsHitTesting(!hide)
                 }
@@ -378,6 +399,7 @@ private let librarySections = ["发现", "收藏", "下载", "我的"]
 @MainActor
 private final class LibraryModel: ObservableObject {
     @Published private(set) var works: [LibraryWork]?
+    @Published private(set) var hiddenHistory = Set<LibraryWorkID>()
     @Published private(set) var failed = false
     private(set) var session: ProgressSession?
     private var generation = UUID()
@@ -394,7 +416,8 @@ private final class LibraryModel: ObservableObject {
                 session = opened
             }
             let rows = try await opened.libraryWorks()
-            if generation == current && !Task.isCancelled { works = rows }
+            let hidden = try await opened.hiddenHistoryIDs(rows)
+            if generation == current && !Task.isCancelled { hiddenHistory = hidden; works = rows }
         } catch {
             if generation == current && !Task.isCancelled { failed = true }
         }
@@ -409,23 +432,29 @@ private final class LibraryModel: ObservableObject {
     }
 }
 
+private enum LibraryDestination {
+    case sites, manageSites, search, subscriptions, updates(Int64?), rankings, recordings, settings, categories
+    case site(InstalledSite)
+    case domainSearch(String)
+    case references(String, [InstalledSite])
+    case work(LibraryWork), chapter(ChapterKey)
+}
+
 @MainActor private struct LibraryWindow: View {
     @ObservedObject var access: LibraryAccess
     @EnvironmentObject private var downloads: DownloadQueue
     @StateObject private var model = LibraryModel()
     @StateObject private var shelf = ShelfOptions()
     @StateObject private var downloadSelection = DownloadSelection()
+    @State private var homeRefresh = 0
+    @State private var interactionSources = Set<String>()
     @StateObject private var siteDisplayOrder = SiteDisplayOrder()
-    @State private var group = 0
+    @Binding var group: Int
     @State private var retry = 0
-    private enum Destination {
-        case sites, manageSites, search, subscriptions, updates, rankings, recordings, settings, categories
-        case site(InstalledSite)
-        case references(String, [InstalledSite])
-        case work(LibraryWork), chapter(ChapterKey)
-    }
-    @State private var destination: Destination?
+    @Binding var destination: LibraryDestination?
     @State private var expandedDownloads = Set<LibraryWorkID>()
+    @State private var historyScope: HistoryShelf.Scope = .all
+    @State private var showingHistory = false
     @State private var showingComicExports = false
     private let labels = librarySections
     private let symbols = ["safari", "heart", "arrow.down.circle", "person.crop.circle"]
@@ -467,6 +496,11 @@ private final class LibraryModel: ObservableObject {
             } else { compact }
         }
         .environmentObject(siteDisplayOrder)
+        .sheet(isPresented: $showingHistory) {
+            if let session = model.session {
+                HistoryShelf(session: session, locale: access.locale, incognito: access.privacy?.incognito == true, tr: access.tr, scope: historyScope)
+            }
+        }
         .sheet(isPresented: $showingComicExports) {
             if let session = model.session {
                 ComicExportShelf(jobs: downloads.exports, session: session, tr: access.tr)
@@ -478,6 +512,7 @@ private final class LibraryModel: ObservableObject {
         }
         .onChange(of: downloads.revision) { _ in retry += 1 }
         .onReceive(NotificationCenter.default.publisher(for: .parkFavoritesChanged)) { _ in retry += 1 }
+        .onReceive(NotificationCenter.default.publisher(for: .parkHistoryChanged)) { _ in retry += 1 }
         .onDisappear { model.close() }
         #if os(iOS)
         .onAppear { openNotification() }
@@ -502,6 +537,12 @@ private final class LibraryModel: ObservableObject {
         #if os(macOS)
         .focusedSceneValue(\.navigateLibrary, choose)
         #endif
+    }
+
+    init(access: LibraryAccess, group: Binding<Int>, destination: Binding<LibraryDestination?>) {
+        self.access = access
+        self._group = group
+        self._destination = destination
     }
 
     private func choose(_ index: Int) {
@@ -563,7 +604,7 @@ private final class LibraryModel: ObservableObject {
             Text(access.tr("加载失败"))
             Button(access.tr("重试")) { retry += 1 }
         } else if let rows = model.works {
-            let filtered = index == 1 ? shelf.rows(rows) : index == 2 ? downloadSelection.rows(rows) : rows.filter { $0.historyMs != nil }
+            let filtered = index == 1 ? shelf.rows(rows) : index == 2 ? downloadSelection.rows(rows) : rows.filter { $0.historyMs != nil && !model.hiddenHistory.contains($0.libraryID) }
             let damaged = index == 2 && (downloadSelection.status == nil || downloadSelection.status == 4)
                 ? rows.filter(\.invalidDownload) : []
             List {
@@ -584,13 +625,14 @@ private final class LibraryModel: ObservableObject {
                     Button(access.tr("重试")) { downloads.refresh(); retry += 1 }
                 }
                 if index == 0 {
+                    Button(access.tr("浏览历史")) { historyScope = .all; showingHistory = true }
                     Button(access.tr("搜索")) { destination = .search }
                     Button(access.tr("排行榜")) { destination = .rankings }
                     Button(access.tr("全部站点")) { destination = .sites }
                     Button(access.tr("订阅")) { destination = .subscriptions }
                 }
                 if index == 1 {
-                    Button(access.tr("书库更新")) { destination = .updates }
+                    Button(access.tr("书库更新")) { destination = .updates(shelf.category) }
                     Button(access.tr("订阅更新")) { destination = .subscriptions }
                     if let session = model.session {
                         ShelfControls(options: shelf, session: session, visible: filtered,
@@ -653,6 +695,10 @@ private final class LibraryModel: ObservableObject {
                                     Button(work.title) { destination = .work(work) }
                                 } else { Text(work.title) }
 
+                                if index == 2, !downloadSelection.selecting, work.downloaded, !work.invalidDownload,
+                                   let session = model.session {
+                                    DownloadRemovalMenu(work: work, session: session, tr: access.tr)
+                                }
                                 if index == 2, !downloadSelection.selecting, work.source != "local", work.media != "bundle" {
                                     Button(access.tr("作品详情")) { destination = .work(work) }
                                         .buttonStyle(.borderless)
@@ -671,30 +717,43 @@ private final class LibraryModel: ObservableObject {
                                         Button(access.tr(resume ? (state == 4 ? "重试" : "继续") : "暂停")) {
                                             Task { await downloads.toggle(work, resume: resume, fallback: session) }
                                         }.buttonStyle(.borderless)
+                                         .accessibilityHint(Text(work.title))
+                                         .accessibilityIdentifier("download-toggle:" + work.source + ":" + work.workId)
                                     }
                                 }
                             }.accessibilityElement(children: .contain)
+                             .modifier(DownloadRowSelectionMenu(enabled: index == 2 && work.downloaded && !work.invalidDownload,
+                                                                work: work, selection: downloadSelection, tr: access.tr))
+                             .modifier(HistoryRowMenu(enabled: index == 0, work: work, session: model.session,
+                                                      offersInteractions: interactionSources.contains(work.source),
+                                                      tr: access.tr, detail: { destination = .work(work) }))
                         }
                     }
                 }
                 if index == 0, let session = model.session, let library = InstalledSources.library {
                     HomeSiteGroups(session: session, library: library, interests: access.privacy?.homeCategories ?? [],
-                        tr: access.tr, references: { destination = .references($0, $1) }) { destination = .site($0) }
+                        locale: access.locale, incognito: access.privacy?.incognito == true, revision: homeRefresh, tr: access.tr,
+                        history: { historyScope = .domain($0); showingHistory = true }, search: { destination = .domainSearch($0) },
+                        references: { destination = .references($0, $1) },
+                        capabilities: { interactionSources = Set($0.filter(\.interaction).map(\.key)) }) { destination = .site($0) }
                 }
-            }
+            }.modifier(HomeRefresh(enabled: index == 0, refresh: { homeRefresh += 1 }))
         } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
     }
 
     @ViewBuilder private func detail(showBack: Bool) -> some View {
         if case .categories? = destination, let session = model.session {
             ShelfCategoryManager(session: session, tr: access.tr, back: leaveChapter)
-        } else if case .updates? = destination, let session = model.session {
+        } else if case .updates(let scope)? = destination, let session = model.session {
             FavoriteUpdatesPage(session: session, locale: access.locale, incognito: access.privacy?.incognito == true,
-                                tr: access.tr, back: leaveChapter)
+                                tr: access.tr, back: leaveChapter, category: scope).id(scope)
         } else if case .subscriptions? = destination, let session = model.session {
             SubscriptionPage(session: session, locale: access.locale, incognito: access.privacy?.incognito == true, tr: access.tr, back: leaveChapter)
         } else if case .rankings? = destination, let session = model.session {
             ChartPage(session: session, locale: access.locale, incognito: access.privacy?.incognito == true, tr: access.tr, back: leaveChapter)
+        } else if case .domainSearch(let domain)? = destination, let session = model.session {
+            AggregateSearchPage(session: session, locale: access.locale, incognito: access.privacy?.incognito == true,
+                                tr: access.tr, back: leaveChapter, category: domain)
         } else if case .search? = destination, let session = model.session {
             AggregateSearchPage(session: session, locale: access.locale, incognito: access.privacy?.incognito == true,
                                 tr: access.tr, back: leaveChapter)
@@ -737,7 +796,7 @@ private final class LibraryModel: ObservableObject {
                 MovieReader(key: key, title: work.chapters.first(where: { $0.id == key.chapterId })?.title ?? work.title,
                              incognito: access.privacy?.incognito == true, showBack: showBack, tr: access.tr, back: leaveChapter, library:online).id(key)
             } else {
-                PageReader(incognito:access.privacy?.incognito==true,tr:access.tr,session:session,key:key,work:work,showBack:showBack,back:leaveChapter,library:online).id(key)
+                PageReader(incognito:access.privacy?.incognito==true,tr:access.tr,session:session,key:key,work:work,showBack:showBack,back:leaveChapter,library:online,changeChapter: { destination = .chapter($0) }).id(key)
             }
         } else { Text(access.tr("选择作品")).foregroundColor(.secondary) }
     }
@@ -761,20 +820,50 @@ private final class LibraryModel: ObservableObject {
     let back: () -> Void
     var library:SourceLibrary? = nil
     var initialPage: Int? = nil
+    var changeChapter: ((ChapterKey) -> Void)?
     @State private var images: ChapterImages?
     @State private var image: CGImage?
     @State private var current: Int32 = 0
     @State private var count: Int32 = 0
+    @State private var sliderPage: Double?
     @State private var requested: Int32?
     @State private var retry = 0
     @State private var busy = true
     @State private var failed = false
 
+    @State private var appearance: ComicAppearance?
+    @State private var showAppearance = false
+    @State private var controlsVisible = true
+    @StateObject private var display = ReaderDisplayActivity()
+    #if os(iOS)
+    @State private var orientationDenied = false
+    #endif
+    @Environment(\.scenePhase) private var phase
+    @Environment(\.privacyObscured) private var obscured
     @State private var readingSettings: ComicReadingSettings?
     @State private var savingMode = false
     @State private var modeError = false
     @State private var settingsRevision = 0
     @State private var scrollTarget: Int32?
+    @State private var pageAspects = [Double]()
+    @State private var landscape = false
+    @State private var trailingHalf = false
+    @State private var zoomAnchor: UnitPoint?
+    private struct OriginalSelection: Identifiable { let id: Int32 }
+    @State private var originalSelection: OriginalSelection?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var spreads: [ComicSpread] {
+        let dual = appearance?.dual == "always" || (appearance?.dual == "landscape" && landscape)
+        return ComicSpread.pages(aspects: pageAspects, dual: dual, coverSingle: appearance?.coverSingle != false,
+                                 splitWide: appearance?.splitWide == true, rtl: readingSettings?.effective == .rightToLeft)
+    }
+
+    private func ordinal(in pages: [ComicSpread]) -> Int? {
+        guard let first = pages.firstIndex(where: { $0.first == current || $0.second == current }) else { return nil }
+        if trailingHalf, pages[first].half != nil, first + 1 < pages.count, pages[first + 1].first == current { return first + 1 }
+        return first
+    }
 
     private func changeMode(_ operation: @escaping () async throws -> Void) {
         guard !savingMode else { return }
@@ -788,6 +877,7 @@ private final class LibraryModel: ObservableObject {
 
     private var modeMenu: some View {
         Menu(tr("阅读设置")) {
+            if appearance != nil { Button(tr("外观")) { showAppearance = true } }
             if let settings = readingSettings {
                 Picker(tr("阅读模式（仅本作）"), selection: Binding(
                     get: { settings.effective },
@@ -811,13 +901,15 @@ private final class LibraryModel: ObservableObject {
 
     var body: some View {
         VStack {
-            HStack {
-                if showBack { Button(tr("返回"), action: back) }
-                Text(work.title).lineLimit(2)
-                Spacer()
-                modeMenu
-                if count > 0 { Text("\(current + 1) / \(count)").monospacedDigit() }
-            }.padding()
+            if controlsVisible {
+                HStack {
+                    if showBack { Button(tr("返回"), action: back) }
+                    Text(work.title).lineLimit(2)
+                    Spacer()
+                    modeMenu
+                    if count > 0 { Text("\(current + 1) / \(count)").monospacedDigit() }
+                }.padding()
+            }
             if modeError {
                 Button(tr("保存失败，请重试")) { modeError = false; settingsRevision += 1 }
             }
@@ -826,39 +918,231 @@ private final class LibraryModel: ObservableObject {
                 Button(tr("重试")) { retry += 1 }
                 Spacer()
             } else if readingSettings?.effective == .vertical, let images, count > 0 {
-                ComicPageStrip(session: session, images: images, count: count, initial: current, jump: scrollTarget, tr: tr) { index in
+                ComicPageStrip(session: session, images: images, appearance: appearance, count: count, initial: current, jump: scrollTarget, tr: tr,
+                               original: { originalSelection = OriginalSelection(id: $0) }) { index in
                     if current != index && requested != index { turn(index, scroll: false) }
-                }
+                }.background(readerBackground)
+                .modifier(ReaderTaps(tap: tapped, doubleTap: magnify))
+                .scaleEffect(zoomAnchor == nil ? 1 : 2, anchor: zoomAnchor ?? .center).clipped()
             } else if let image {
-                Image(decorative: image, scale: 1).resizable().scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                    .gesture(DragGesture(minimumDistance: 35).onEnded { drag in
-                        guard !busy, abs(drag.translation.width) > abs(drag.translation.height) else { return }
+                GeometryReader { area in
+                    let pages = spreads
+                    let spread = ordinal(in: pages).map { pages[$0] }
+                    HStack(spacing: 0) {
+                        if let spread, let other = spread.second, let images {
+                            let pair = readingSettings?.effective == .rightToLeft ? [other, spread.first] : [spread.first, other]
+                            ForEach(pair, id: \.self) { page in
+                                Group {
+                                    if page == current { ReaderArtwork(image: image, appearance: appearance) }
+                                    else {
+                                        ComicStripImage(session: session, chapter: images, index: page, tr: tr, appearance: appearance) { aspect in
+                                            if pageAspects.indices.contains(Int(page)), pageAspects[Int(page)] == 0 {
+                                                pageAspects[Int(page)] = aspect
+                                            }
+                                        }
+                                    }
+                                }.frame(width: area.size.width / 2, height: area.size.height)
+                                .accessibilityIdentifier("reader-page-" + String(page + 1))
+                                .contentShape(Rectangle()).contextMenu { originalButton(page) }
+                            }
+                        } else {
+                            ReaderArtwork(image: halfImage(image, spread?.half), appearance: appearance)
+                                .id(current)
+                                .frame(width: area.size.width, height: area.size.height)
+                                .contentShape(Rectangle()).contextMenu { originalButton(current) }
+                        }
+                    }.environment(\.layoutDirection, .leftToRight)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("reading-canvas")
+                    .scaleEffect(zoomAnchor == nil ? 1 : 2, anchor: zoomAnchor ?? .center).clipped()
+                    .background(readerBackground).contentShape(Rectangle())
+                    .modifier(ReaderTaps(tap: tapped, doubleTap: magnify))
+                    .simultaneousGesture(DragGesture(minimumDistance: 35).onEnded { drag in
+                        guard !busy, zoomAnchor == nil, abs(drag.translation.width) > abs(drag.translation.height) else { return }
                         let next = (drag.translation.width < 0) != (readingSettings?.effective == .rightToLeft)
-                        turn(current + (next ? 1 : -1))
+                        advance(next ? 1 : -1)
                     })
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("reader-viewport")
             } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
-            HStack {
-                Button(tr("上一页")) { turn(current - 1) }.disabled(busy || current == 0)
-                Spacer()
-                Button(tr("下一页")) { turn(current + 1) }.disabled(busy || current + 1 >= count)
-            }.environment(\.layoutDirection, readingSettings?.effective == .rightToLeft ? .rightToLeft : .leftToRight)
-             .padding()
-        }.task(id: retry) { await load() }
+            if controlsVisible {
+                if count > 1 {
+                    Slider(value: Binding(get: { sliderPage ?? Double(current) }, set: { sliderPage = $0 }),
+                        in: 0...Double(count - 1), step: 1, onEditingChanged: { editing in
+                            if !editing, let sliderPage {
+                                self.sliderPage = nil
+                                turn(Int32(sliderPage.rounded()))
+                            }
+                        }, label: { Text(tr("页码")) }).accessibilityIdentifier("reader-progress").padding(.horizontal)
+                }
+                HStack {
+                    Button(tr("上一页")) { advance(-1) }.disabled(busy || !canAdvance(-1))
+                        #if os(macOS)
+                        .keyboardShortcut(readingSettings?.effective == .rightToLeft ? .rightArrow : .leftArrow, modifiers: [])
+                        #endif
+                    Spacer()
+                    if changeChapter != nil && work.chapters.count > 1 {
+                        Menu(tr("章节")) {
+                            Button(tr("上一章")) { openAdjacent(-1) }.disabled(adjacent(-1) == nil)
+                            Button(tr("下一章")) { openAdjacent(1) }.disabled(adjacent(1) == nil)
+                        }.disabled(busy)
+                        Spacer()
+                    }
+                    Button(tr("下一页")) { advance(1) }.disabled(busy || !canAdvance(1))
+                        #if os(macOS)
+                        .keyboardShortcut(readingSettings?.effective == .rightToLeft ? .leftArrow : .rightArrow, modifiers: [])
+                        #endif
+                }.environment(\.layoutDirection, readingSettings?.effective == .rightToLeft ? .rightToLeft : .leftToRight)
+                 .padding()
+            } else if appearance?.showPageNumber != false && count > 0 {
+                Text("\(current + 1) / \(count)").font(.caption).monospacedDigit()
+            }
+        }
+        #if os(iOS)
+        .statusBar(hidden: !controlsVisible)
+        .background {
+            if !busy, !obscured, originalSelection == nil, !showAppearance, zoomAnchor == nil {
+                let mode = readingSettings?.effective
+                readerShortcut(.leftArrow, mode == .rightToLeft ? 1 : -1)
+                readerShortcut(.rightArrow, mode == .rightToLeft ? -1 : 1)
+                readerShortcut(.pageUp, -1)
+                readerShortcut(.pageDown, 1)
+                if mode == .vertical {
+                    readerShortcut(.upArrow, -1)
+                    readerShortcut(.downArrow, 1)
+                }
+            }
+        }
+        .background(ReaderSceneOrientation(preference: obscured ? "auto" : appearance?.orientation ?? "auto") { orientationDenied = $0 })
+        .overlay(alignment: .top) {
+            if controlsVisible && orientationDenied {
+                Text(tr("当前窗口的方向由系统管理")).font(.caption).padding(6).background(.regularMaterial)
+            }
+        }
+        #else
+        .background(ReaderKeyboard { keyCode in
+            guard !busy, !obscured, originalSelection == nil, !showAppearance, zoomAnchor == nil else { return false }
+            let delta: Int32
+            switch keyCode {
+            case 123: delta = readingSettings?.effective == .rightToLeft ? 1 : -1
+            case 124: delta = readingSettings?.effective == .rightToLeft ? -1 : 1
+            case 116: delta = -1
+            case 121: delta = 1
+            case 125 where readingSettings?.effective == .vertical: delta = 1
+            case 126 where readingSettings?.effective == .vertical: delta = -1
+            default: return false
+            }
+            advance(delta)
+            return true
+        })
+        #endif
+        .background(GeometryReader { area in
+            Color.clear.onAppear { landscape = area.size.width > area.size.height }
+                .onChange(of: area.size) { landscape = $0.width > $0.height }
+        })
+        .task(id: retry) { await load() }
          .task(id: settingsRevision) {
             do {
                 let settings = try await session.comicReadingSettings(key)
+                let view = try await session.comicAppearance()
                 try Task.checkCancellation()
+                let cropChanged = (appearance?.crop ?? false) != view.crop
+                appearance = view
                 readingSettings = settings
+                if cropChanged { retry += 1 }
                 modeError = false
             } catch { if !Task.isCancelled { modeError = true } }
          }
          .onReceive(NotificationCenter.default.publisher(for: .parkReaderModeChanged)) { _ in settingsRevision += 1 }
+         .sheet(isPresented: $showAppearance) {
+            if let appearance { ReaderAppearanceForm(original: appearance, vertical: readingSettings?.effective == .vertical, session: session, tr: tr) }
+         }
+         .sheet(item: $originalSelection) { selection in
+             if let images { OriginalPageActions(session: session, images: images, index: selection.id, tr: tr) }
+         }
+         .onAppear { display.set(holdingDisplay) }
+         .onChange(of: holdingDisplay) { display.set($0) }
+         .onDisappear { display.set(false) }
     }
 
-    private func turn(_ index: Int32, scroll: Bool = true) {
+    private var holdingDisplay: Bool { phase == .active && !obscured && appearance?.keepAwake == true }
+    #if os(iOS)
+    private func readerShortcut(_ key: KeyEquivalent, _ delta: Int32) -> some View {
+        Button(tr(delta > 0 ? "下一页" : "上一页")) { advance(delta) }
+            .keyboardShortcut(key, modifiers: [], localization: .fixed)
+            .disabled(!canAdvance(delta))
+            .frame(width: 0, height: 0).clipped().accessibilityHidden(true).allowsHitTesting(false)
+    }
+    #endif
+    private func originalButton(_ index: Int32) -> some View {
+        Button(tr("第 {value0} 页").replacingOccurrences(of: "{value0}", with: String(index + 1))) {
+            originalSelection = OriginalSelection(id: index)
+        }
+    }
+    private var readerBackground: Color {
+        switch appearance?.background { case "white": return .white; case "gray": return .gray; default: return .black }
+    }
+
+    private func adjacent(_ offset: Int) -> OfflineChapter? {
+        guard changeChapter != nil, let index = work.chapters.firstIndex(where: { $0.id == key.chapterId }),
+              work.chapters.indices.contains(index + offset) else { return nil }
+        return work.chapters[index + offset]
+    }
+
+    private func openAdjacent(_ offset: Int) {
+        guard !busy, let next = adjacent(offset) else { return }
+        changeChapter?(ChapterKey(source: key.source, workId: key.workId, chapterId: next.id))
+    }
+
+    private func canAdvance(_ delta: Int32) -> Bool {
+        if readingSettings?.effective != .vertical {
+            let pages = spreads
+            if let i = ordinal(in: pages) { return pages.indices.contains(i + Int(delta)) || adjacent(Int(delta)) != nil }
+        }
+        return (0..<count).contains(current + delta) || adjacent(Int(delta)) != nil
+    }
+
+    private func tapped(_ point: UnitPoint) {
+        guard zoomAnchor == nil else { return }
+        switch appearance?.tap(x: Double(point.x), y: Double(point.y), mode: readingSettings?.effective ?? .leftToRight) {
+        case .next: if !busy { advance(1) }
+        case .previous: if !busy { advance(-1) }
+        default: controlsVisible.toggle()
+        }
+    }
+
+    private func magnify(_ point: UnitPoint) { zoomAnchor = zoomAnchor == nil ? point : nil }
+
+    private func halfImage(_ image: CGImage, _ half: ComicSpread.Half?) -> CGImage {
+        guard let half, image.width >= 2 else { return image }
+        let mid = image.width / 2
+        let x = half == .left ? 0 : mid
+        return image.cropping(to: CGRect(x: x, y: 0, width: half == .left ? mid : image.width - mid, height: image.height)) ?? image
+    }
+
+    private func advance(_ delta: Int32) {
+        if readingSettings?.effective != .vertical {
+            let pages = spreads
+            if let i = ordinal(in: pages) {
+                let target = i + Int(delta)
+                guard pages.indices.contains(target) else { openAdjacent(Int(delta)); return }
+                let next = pages[target]
+                let lastHalf = next.half != nil && target > 0 && pages[target - 1].first == next.first
+                if next.first == current { trailingHalf = lastHalf }
+                else { turn(next.first, trailing: lastHalf) }
+                return
+            }
+        }
+        let next = current + delta
+        if (0..<count).contains(next) { turn(next) }
+        else { openAdjacent(Int(delta)) }
+    }
+
+    private func turn(_ index: Int32, scroll: Bool = true, trailing: Bool = false) {
         guard (0..<count).contains(index) else { return }
+        trailingHalf = trailing
+        zoomAnchor = nil
         if scroll { scrollTarget = index } else { scrollTarget = nil }
         busy = true
         requested = index
@@ -891,18 +1175,24 @@ private final class LibraryModel: ObservableObject {
                 let history = work.historyChapter == key.chapterId ? work.historyPage : 0
                 index = Int32(max(0, min(Int64(total - 1), previous?.pageIndex ?? history)))
             }
-            let asset = try await session.pageImage(chapter, index: index)
+            let asset = try await session.pageImage(chapter, index: index, crop: appearance?.crop == true)
             let pixels = try await decodedPage(asset,maxSize:4096)
             try Task.checkCancellation()
-            if (requested != nil || (initialPage != nil && count == 0)) && !incognito {
+            if (requested != nil || count == 0 && (initialPage != nil || work.historyChapter != key.chapterId)) && !incognito {
                 let turn = PageTurn(key: key, historyChapterId: key.chapterId,
                     chapterTitle: work.chapters.first(where: { $0.id == key.chapterId })?.title,
                     pageIndex: Int64(index), pageCount: Int64(total), updatedMs: Int64(Date().timeIntervalSince1970 * 1000))
                 _ = try await session.turnPage(turn)
             }
             try Task.checkCancellation()
-            image = pixels
-            current = index
+            if pageAspects.count != total { pageAspects = chapter.aspects() }
+            if pageAspects.indices.contains(Int(index)), pageAspects[Int(index)] == 0 {
+                pageAspects[Int(index)] = Double(pixels.width) / Double(pixels.height)
+            }
+            withAnimation(!reduceMotion && appearance?.animated != false && requested != nil && readingSettings?.effective != .vertical ? .easeOut(duration: 0.18) : nil) {
+                image = pixels
+                current = index
+            }
             count = total
             requested = nil
         } catch { if !Task.isCancelled { failed = true } }
@@ -919,10 +1209,12 @@ private struct VisibleComicRows: PreferenceKey {
 @MainActor private struct ComicPageStrip: View {
     let session: ProgressSession
     let images: ChapterImages
+    let appearance: ComicAppearance?
     let count: Int32
     let initial: Int32
     let jump: Int32?
     let tr: (String) -> String
+    let original: (Int32) -> Void
     let visible: (Int32) -> Void
     @Namespace private var viewport
     @State private var aligned = false
@@ -931,10 +1223,14 @@ private struct VisibleComicRows: PreferenceKey {
         GeometryReader { area in
             ScrollViewReader { reader in
                 ScrollView {
-                    LazyVStack(spacing: 0) {
+                    LazyVStack(spacing: CGFloat(appearance?.gap ?? 0)) {
                         ForEach(0..<Int(count), id: \.self) { n in
-                            ComicStripImage(session: session, chapter: images, index: Int32(n), tr: tr)
+                            ComicStripImage(session: session, chapter: images, index: Int32(n), tr: tr, appearance: appearance)
                                 .frame(width: area.size.width, height: area.size.height)
+                                .accessibilityIdentifier("reader-page-" + String(n + 1))
+                                .contentShape(Rectangle()).contextMenu {
+                                    Button(tr("第 {value0} 页").replacingOccurrences(of: "{value0}", with: String(n + 1))) { original(Int32(n)) }
+                                }
                                 .background(GeometryReader { row in
                                     Color.clear.preference(key: VisibleComicRows.self,
                                         value: [Int32(n): row.frame(in: .named(viewport)).midY])
@@ -942,6 +1238,7 @@ private struct VisibleComicRows: PreferenceKey {
                         }
                     }
                 }.coordinateSpace(name: viewport)
+                 .accessibilityIdentifier("reader-scroll-viewport")
                  .onAppear { reader.scrollTo(Int(initial), anchor: .center) }
                  .onChange(of: jump) { value in
                      if let value { reader.scrollTo(Int(value), anchor: .center) }
@@ -966,21 +1263,23 @@ private struct VisibleComicRows: PreferenceKey {
     let chapter: ChapterImages
     let index: Int32
     let tr: (String) -> String
+    let appearance: ComicAppearance?
+    var measured: ((Double) -> Void)? = nil
     @State private var pixels: CGImage?
     @State private var failed = false
     @State private var attempt = 0
     var body: some View {
         Group {
-            if let pixels { Image(decorative: pixels, scale: 1).resizable().scaledToFit() }
+            if let pixels { ReaderArtwork(image: pixels, appearance: appearance) }
             else if failed { Button(tr("重试")) { attempt += 1 } }
             else { ProgressView() }
-        }.task(id: attempt) {
-            if pixels != nil { return }
+        }.task(id: "\(attempt)-\(appearance?.crop == true)") {
             failed = false
             do {
-                let asset = try await session.pageImage(chapter, index: index)
+                let asset = try await session.pageImage(chapter, index: index, crop: appearance?.crop == true)
                 let image = try await decodedPage(asset, maxSize: 4096)
                 try Task.checkCancellation()
+                measured?(Double(image.width) / Double(image.height))
                 pixels = image
             } catch { if !Task.isCancelled { failed = true } }
         }.onDisappear { pixels = nil }
@@ -1025,13 +1324,28 @@ let appleCategoryOptions: [AppleCategoryOption] = [
     AppleCategoryOption(id: "asmr", label: "音声")
 ]
 
+private struct HomeRefresh: ViewModifier {
+    let enabled: Bool
+    let refresh: @MainActor () -> Void
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled { content.refreshable { await refresh() } }
+        else { content }
+    }
+}
+
 @MainActor private struct HomeSiteGroups: View {
     @EnvironmentObject private var displayOrder: SiteDisplayOrder
     let session: ProgressSession
     let library: SourceLibrary
     let interests: [String]
+    let locale: String
+    let incognito: Bool
+    let revision: Int
     let tr: (String) -> String
+    let history: (String) -> Void
+    let search: (String) -> Void
     let references: (String, [InstalledSite]) -> Void
+    let capabilities: ([InstalledSite]) -> Void
     let open: (InstalledSite) -> Void
     @State private var sites: [InstalledSite] = []
     @State private var failed = false
@@ -1040,6 +1354,12 @@ let appleCategoryOptions: [AppleCategoryOption] = [
     @State private var media = "all"
     @State private var order: [String] = []
     @State private var saving = false
+    @State private var expanded = Set<String>()
+    @State private var hidden = Set<String>()
+    @State private var dataSaver = false
+    @State private var feedRevision = 0
+    @State private var optionsSite: InstalledSite?
+    @StateObject private var translation = TranslationPage()
 
     private var categories: [AppleCategoryOption] {
         discoveryDomains(order: order, dimension: dimension, media: media).compactMap { id in
@@ -1063,6 +1383,11 @@ let appleCategoryOptions: [AppleCategoryOption] = [
 
     var body: some View {
         Section(header: Text(tr("首页兴趣"))) {
+            HStack {
+                TranslationControls(page: translation, tr: tr)
+                Spacer()
+                Button(tr("刷新")) { if !dataSaver { feedRevision += 1 }; attempt += 1 }
+            }.buttonStyle(.borderless)
             Picker(tr("内容范围"), selection: Binding(get: { dimension }, set: { save(dimension: $0, media: media) })) {
                 Text(tr("全部")).tag("all")
                 Text(tr("二次元")).tag("twoD")
@@ -1080,14 +1405,51 @@ let appleCategoryOptions: [AppleCategoryOption] = [
                 let rows = displayOrder.ordered(sites.filter { $0.isBrowsableSite && $0.category == option.id })
                 let catalogs = displayOrder.ordered(sites.filter { $0.offersReference(in: option.id) })
                 if (!rows.isEmpty || !catalogs.isEmpty) && (interests.isEmpty || interests.contains(option.id)) {
-                    DisclosureGroup(tr(option.label)) {
+                    DisclosureGroup(isExpanded: Binding(get: { expanded.contains(option.id) }, set: { yes in
+                        update {
+                            expanded = Set(try await session.setHomeDomain(option.id, expanded: yes))
+                        }
+                    })) {
+                        Button(tr("搜索")) { search(option.id) }
+                            .accessibilityIdentifier("domain-search:" + option.id)
+                        Button(tr("浏览历史")) { history(option.id) }
+                            .accessibilityIdentifier("domain-history:" + option.id)
                         if !catalogs.isEmpty {
                             Button(tr("搜索作品资料")) { references(option.id, catalogs) }
+                                .accessibilityIdentifier("domain-references:" + option.id)
                         }
-                        ForEach(rows) { site in Button(site.name ?? site.key) { open(site) } }
-                    }
+                        if let first = rows.first, rows.count > 1 {
+                            Menu(tr("选择展示站点")) {
+                                ForEach(rows) { site in
+                                    Button(site.name ?? site.key) {
+                                        guard site.key != first.key else { return }
+                                        update {
+                                            try await session.moveSite(library, key: site.key, anchor: first.key, after: false)
+                                            displayOrder.clear()
+                                            NotificationCenter.default.post(name: .parkSiteOrderChanged, object: nil)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        ForEach(rows) { site in
+                            VStack(alignment: .leading) {
+                                Button(site.name ?? site.key) { open(site) }.contextMenu {
+                                    Button(tr("站点设置")) { optionsSite = site }
+                                    visibilityButton(site)
+                                }
+                                if !dataSaver && !hidden.contains(site.key) && site.entryFeed != nil {
+                                    HomeFeedPreview(session: session, library: library, site: site, locale: locale,
+                                                    incognito: incognito, tr: tr, translation: translation, revision: feedRevision)
+                                }
+                            }
+                        }
+                    } label: { Text(tr(option.label)) }
                 }
             }
+        }.onChange(of: revision) { _ in
+            if !dataSaver { feedRevision += 1 }
+            attempt += 1
         }.onReceive(NotificationCenter.default.publisher(for: .parkSiteOrderChanged)) { _ in
             attempt += 1
         }.task(id: attempt) {
@@ -1098,9 +1460,73 @@ let appleCategoryOptions: [AppleCategoryOption] = [
                 dimension = settings.homeDimension ?? "all"
                 media = settings.homeMedia ?? "all"
                 order = settings.domainOrder ?? []
+                expanded = Set(settings.homeExpandedDomains ?? [])
+                hidden = Set(settings.homeHiddenSources ?? [])
+                dataSaver = (settings.dataSavingMode ?? "off") != "off"
                 sites = values
+                capabilities(values)
                 failed = false
             } catch { if !Task.isCancelled { failed = true } }
+        }.sheet(item: $optionsSite) { site in
+            SiteSettingsPage(session: session, library: library, site: site, locale: locale, tr: tr,
+                             changed: { attempt += 1 }, signedIn: { optionsSite = nil })
+        }
+    }
+
+    private func visibilityButton(_ site: InstalledSite) -> some View {
+        Toggle(tr("显示该站点的作品并自动加载"), isOn: Binding(get: { !hidden.contains(site.key) }, set: { visible in
+            update { hidden = Set(try await session.setHomeSite(site.key, visible: visible)) }
+        }))
+    }
+
+    private func update(_ change: @escaping () async throws -> Void) {
+        guard !saving else { return }
+        saving = true
+        Task {
+            defer { saving = false }
+            do { try await change(); failed = false } catch { failed = true }
+        }
+    }
+}
+
+@MainActor private struct HomeFeedPreview: View {
+    let session: ProgressSession
+    let library: SourceLibrary
+    let site: InstalledSite
+    let locale: String
+    let incognito: Bool
+    let tr: (String) -> String
+    @ObservedObject var translation: TranslationPage
+    let revision: Int
+    @StateObject private var prompt = SitePrompt()
+    @State private var works: [SiteWork] = []
+    @State private var selected: SiteWork?
+    @State private var failed = false
+    @State private var retry = 0
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(works) { work in
+                Button { selected = work } label: {
+                    RemoteText(original: work.title, dictionary: nil, session: session, library: library, locale: locale, page: translation)
+                }.buttonStyle(.borderless).disabled(!site.detail)
+            }
+            if failed { Text(tr("加载失败")); Button(tr("重试")) { retry += 1 } }
+        }.task(id: "\(revision)/\(retry)") {
+            failed = false
+            do {
+                let page = try await prompt.perform { ticket in
+                    try await session.sitePage(library, site: site, keyword: "", page: 1, cursor: nil, confirmation: ticket)
+                }
+                try Task.checkCancellation()
+                works = Array(page.items.prefix(6))
+            } catch { if !Task.isCancelled { failed = true } }
+        }.siteConfirmation(prompt, tr: tr)
+        .sheet(item: $selected) { work in
+            SiteDetails(session: session, library: library, site: site, workId: work.id, preview: work, locale: locale,
+                        incognito: incognito, tr: tr, close: { selected = nil })
+            #if os(macOS)
+            .frame(minWidth: 440, minHeight: 360)
+            #endif
         }
     }
 }
@@ -1182,6 +1608,13 @@ let appleCategoryOptions: [AppleCategoryOption] = [
     }
 }
 
+private extension Color {
+    init(parkRGB value: UInt32) {
+        self.init(.sRGB, red: Double((value >> 16) & 255) / 255,
+                  green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255)
+    }
+}
+
 private struct AppleSettingsForm<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
@@ -1200,19 +1633,24 @@ private struct AppleSettingsForm<Content: View>: View {
     @ObservedObject var access: LibraryAccess
     let session: ProgressSession?
     let back: () -> Void
-    @State private var categories = Set(appleCategoryOptions.map { $0.id })
+    private let allCategories = Set(appleCategoryOptions.map { $0.id })
+    private var categories: Set<String> {
+        guard let saved = access.privacy?.homeCategories, !saved.isEmpty else { return allCategories }
+        return Set(saved)
+    }
     @State private var editProxy = false
     @State private var dictionaries = false
+    @State private var subscriptionSettings = false
     @State private var proxy = ""
     @State private var invalidProxy = false
+    #if os(macOS)
+    @State private var displaySettingsFailed = false
+    #endif
 
-    private func proxySummary(_ value: String) -> String? {
-        guard let url = URLComponents(string: value.contains("://") ? value : "http://" + value),
-              ["http","https"].contains(url.scheme?.lowercased() ?? ""), let host = url.host, !host.isEmpty,
-              let port = url.port, (1...65535).contains(port),
-              url.path.isEmpty || url.path == "/", url.query == nil, url.fragment == nil else { return nil }
-        return host + ":" + String(port)
-    }
+    private let accents: [(UInt32,String)] = [
+        (0xFFC96442,"陶土"),(0xFFB8862F,"琥珀"),(0xFF5F8A62,"青苔"),(0xFF4F6FB8,"靛蓝"),(0xFF8A5C9E,"梅紫"),(0xFFC25878,"樱粉")
+    ]
+
 
     var body: some View {
         AppleSettingsForm {
@@ -1220,6 +1658,37 @@ private struct AppleSettingsForm<Content: View>: View {
                 Button(access.tr("返回"), action: back)
                 Text(access.tr("应用设置")).font(.headline)
             }
+            Section(header: Text(access.tr("外观"))) {
+                Picker(access.tr("主题"), selection: Binding(get: { access.privacy?.themeMode ?? 0 }, set: { mode in
+                    Task { await access.updatePreference("themeMode", json: String(mode)) }
+                })) {
+                    Text(access.tr("跟随系统")).tag(0); Text(access.tr("浅色")).tag(1); Text(access.tr("深色")).tag(2)
+                }.pickerStyle(.menu).accessibilityIdentifier("settings-theme")
+                Picker(access.tr("强调色"), selection: Binding(get: { access.privacy?.seedColor }, set: { selected in
+                    if let selected { Task { await access.updatePreference("seedColor", json: String(selected)) } }
+                })) {
+                    if access.privacy?.seedColor == nil { Text(access.tr("跟随系统")).tag(UInt32?.none) }
+                    if let saved = access.privacy?.seedColor, !accents.contains(where: { $0.0 == saved }) {
+                        Text(access.tr("当前")).tag(Optional(saved))
+                    }
+                    ForEach(accents, id: \.0) { color, name in
+                        Label { Text(access.tr(name)) } icon: { Circle().fill(Color(parkRGB: color)).frame(width: 12,height: 12) }
+                            .tag(Optional(color))
+                    }
+                }.pickerStyle(.menu).accessibilityIdentifier("settings-accent")
+            }
+            #if os(macOS)
+            Section {
+                Button(access.tr("屏幕刷新率")) {
+                    guard let panel = FileManager.default.urls(for: .preferencePanesDirectory, in: .systemDomainMask).first else {
+                        displaySettingsFailed = true
+                        return
+                    }
+                    displaySettingsFailed = !NSWorkspace.shared.open(panel.appendingPathComponent("Displays.prefPane"))
+                }
+                if displaySettingsFailed { Text(access.tr("无法打开链接")) }
+            }
+            #endif
             Section(header: Text(access.tr("隐私与安全"))) {
                 Toggle(access.tr("模糊封面"), isOn: Binding(
                     get: { access.privacy?.blurCovers == true },
@@ -1233,6 +1702,17 @@ private struct AppleSettingsForm<Content: View>: View {
                     get: { access.privacy?.appLock == true },
                     set: { value in Task { await access.updatePrivacy("appLock", enabled: value) } }
                 ))
+                if access.privacy?.appLock == true {
+                    Picker(access.tr("离开多久后重新锁定"), selection: Binding(
+                        get: { access.privacy?.appLockAfter ?? 0 },
+                        set: { seconds in Task { await access.updatePreference("appLockAfter", json: String(seconds)) } }
+                    )) {
+                        Text(access.tr("立即")).tag(0)
+                        Text(access.tr("1 分钟")).tag(60)
+                        Text(access.tr("5 分钟")).tag(300)
+                        Text(access.tr("15 分钟")).tag(900)
+                    }.pickerStyle(.menu)
+                }
                 Toggle(access.tr("订阅通知"), isOn: Binding(
                     get: { access.privacy?.subscriptionNotifications == true },
                     set: { value in Task { await access.updatePrivacy("subscriptionNotifications", enabled: value) } }
@@ -1242,6 +1722,11 @@ private struct AppleSettingsForm<Content: View>: View {
                     set: { value in Task { await access.updatePrivacy("subscriptionNotificationPreview", enabled: value) } }
                 ))
             }
+            if session != nil {
+                Section(header: Text(access.tr("订阅与通知"))) {
+                    Button(access.tr("订阅与通知设置")) { subscriptionSettings = true }
+                }
+            }
             Section(header: Text(access.tr("网络"))) {
                 Button(access.tr("HTTP 代理")) {
                     proxy = access.privacy?.proxy ?? ""
@@ -1250,7 +1735,7 @@ private struct AppleSettingsForm<Content: View>: View {
                 }
                 let stored = access.privacy?.proxy ?? ""
                 Text(stored.isEmpty ? access.tr("未设置（使用系统网络 / VPN）") :
-                    proxySummary(stored) ?? access.tr("代理地址格式无效，请填写主机:端口")).font(.caption)
+                    ProgressSession.proxySummary(stored) ?? access.tr("代理地址格式无效，请填写主机:端口")).font(.caption)
             }
             if let session {
                 AppleStorageSettings(session: session, tr: access.tr)
@@ -1272,9 +1757,15 @@ private struct AppleSettingsForm<Content: View>: View {
                     Text("Español").tag("es")
                     Text("Русский").tag("ru")
                     Text("العربية").tag("ar")
-                }
+                }.pickerStyle(.menu).accessibilityIdentifier("settings-language")
             }
             if session != nil, InstalledSources.library != nil {
+                Section(header: Text(access.tr("内容翻译"))) {
+                    Toggle(access.tr("自动翻译可见内容"), isOn: Binding(get: { access.privacy?.autoTranslateContent == true }, set: { active in
+                        Task { await access.updatePreference("autoTranslateContent", json: String(active)) }
+                    }))
+                    Text(access.tr("翻译时，所选标题、简介、标签、评论、正文、字幕、弹幕及搜索词会发送给 Google 翻译。已命中当前语言词包的内容不发送；账号凭据、Cookie 和阅读记录不作为翻译数据发送。")).font(.caption)
+                }
                 Section(header: Text(access.tr("官方标签翻译包"))) {
                     Button(access.tr("翻译包管理")) { dictionaries = true }
                 }
@@ -1284,21 +1775,28 @@ private struct AppleSettingsForm<Content: View>: View {
                     Toggle(access.tr(option.label), isOn: Binding(
                         get: { categories.contains(option.id) },
                         set: { enabled in
-                            if enabled { categories.insert(option.id) }
-                            else { categories.remove(option.id) }
+                            var selected = categories
+                            if enabled { selected.insert(option.id) }
+                            else { selected.remove(option.id) }
+                            guard !selected.isEmpty,
+                                  let data = try? JSONEncoder().encode(selected == allCategories ? [] : selected.sorted()) else { return }
+                            Task { await access.updatePreference("homeCategories", json: String(decoding: data, as: UTF8.self)) }
                         }
-                    ))
+                    )).disabled(categories.count == 1 && categories.contains(option.id))
                 }
-                Button(access.tr("保存")) {
-                    let selected: Set<String> = categories.count == appleCategoryOptions.count ? [] : categories
-                    let data = (try? JSONEncoder().encode(selected.sorted())) ?? Data("[]".utf8)
-                    let json = String(data: data, encoding: .utf8) ?? "[]"
-                    Task { await access.updatePreference("homeCategories", json: json) }
-                }.disabled(access.busy || categories.isEmpty)
             }
             if access.failed { Text(access.tr("保存失败，请重试")) }
         }
         .disabled(access.busy)
+        .sheet(isPresented: $subscriptionSettings) {
+            if let session {
+                SubscriptionPage(session: session, locale: access.locale, incognito: access.privacy?.incognito == true,
+                    tr: access.tr, back: { subscriptionSettings = false }, fromSettings: true)
+                #if os(macOS)
+                .frame(minWidth: 460, minHeight: 390)
+                #endif
+            }
+        }
         .sheet(isPresented: $dictionaries) {
             if let session, let library = InstalledSources.library {
                 AppleTagPacks(session: session, library: library, initialLocale: access.locale, tr: access.tr)
@@ -1308,6 +1806,7 @@ private struct AppleSettingsForm<Content: View>: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(access.tr("HTTP 代理")).font(.headline)
                 TextField(access.tr("填写代理主机:端口，留空表示不使用"), text: $proxy)
+                    .accessibilityIdentifier("proxy-address")
                     .textFieldStyle(.roundedBorder).onChange(of: proxy) { _ in invalidProxy = false }
                 if invalidProxy { Text(access.tr("代理地址格式无效，请填写主机:端口")) }
                 if access.failed { Text(access.tr("保存失败，请重试")) }
@@ -1315,7 +1814,7 @@ private struct AppleSettingsForm<Content: View>: View {
                     Button(access.tr("取消")) { editProxy = false }
                     Button(access.tr("保存")) {
                         let value = proxy.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard value.isEmpty || proxySummary(value) != nil else { invalidProxy = true; return }
+                        guard value.isEmpty || ProgressSession.proxySummary(value) != nil else { invalidProxy = true; return }
                         Task {
                             guard let encoded = try? JSONEncoder().encode(value) else { return }
                             await access.updatePreference("proxy", json: String(decoding: encoded, as: UTF8.self))
@@ -1325,20 +1824,16 @@ private struct AppleSettingsForm<Content: View>: View {
                 }
             }.padding().disabled(access.busy).interactiveDismissDisabled(access.busy)
         }
-        .onAppear {
-            if let saved = access.privacy?.homeCategories, !saved.isEmpty { categories = Set(saved) }
-        }
     }
 }
 
 @MainActor private struct AppleOnboardingPanel: View {
     @ObservedObject var access: LibraryAccess
-    @State private var blurCovers = false
-    @State private var secureScreen = false
     @State private var categories = Set(appleCategoryOptions.map { $0.id })
 
     private func complete(_ selected: Set<String>) {
-        Task { await access.finishOnboarding(categories: selected, secureScreen: secureScreen, blurCovers: blurCovers) }
+        Task { await access.finishOnboarding(categories: selected, secureScreen: access.privacy?.secureScreen == true,
+                                             blurCovers: access.privacy?.blurCovers == true) }
     }
 
     private var finish: some View {
@@ -1357,8 +1852,10 @@ private struct AppleSettingsForm<Content: View>: View {
             Text(access.tr("选择首页内容范围，并设置隐私保护选项。之后仍可在我的页面调整。"))
                 .foregroundColor(.secondary)
             Section(header: Text(access.tr("隐私"))) {
-                Toggle(access.tr("模糊封面"), isOn: $blurCovers)
-                Toggle(access.tr("安全屏幕"), isOn: $secureScreen)
+                Toggle(access.tr("模糊封面"), isOn: Binding(get: { access.privacy?.blurCovers == true },
+                    set: { value in Task { await access.updatePrivacy("blurCovers", enabled: value) } }))
+                Toggle(access.tr("安全屏幕"), isOn: Binding(get: { access.privacy?.secureScreen == true },
+                    set: { value in Task { await access.updatePrivacy("secureScreen", enabled: value) } }))
                 Toggle(access.tr("应用锁"), isOn: Binding(
                     get: { access.privacy?.appLock == true },
                     set: { value in Task { await access.updatePrivacy("appLock", enabled: value) } }
@@ -1391,8 +1888,6 @@ private struct AppleSettingsForm<Content: View>: View {
         #endif
         .disabled(access.busy)
         .onAppear {
-            secureScreen = access.privacy?.secureScreen == true
-            blurCovers = access.privacy?.blurCovers == true
             if let saved = access.privacy?.homeCategories, !saved.isEmpty { categories = Set(saved) }
         }
     }

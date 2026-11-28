@@ -9,7 +9,7 @@ Park.register({
     "ru": {"成人视频，支持热门、搜索和多清晰度 MP4 播放": "Видео для взрослых: популярное, поиск и MP4 в разных качествах"},
     "ar": {"成人视频，支持热门、搜索和多清晰度 MP4 播放": "فيديوهات البالغين مع قوائم شائعة وبحث وتشغيل MP4 بجودات متعددة"},
   },
-  key: 'thumbzilla', name: 'Thumbzilla', version: '0.0.11', minAppVersion: '0.13.6', type: 'video', category: 'adult', color: '#FF9900',
+  key: 'thumbzilla', name: 'Thumbzilla', version: '0.0.12', minAppVersion: '0.13.6', type: 'video', category: 'adult', color: '#FF9900',
   description: '成人视频，支持热门、搜索和多清晰度 MP4 播放', homepage: 'https://www.thumbzilla.com',
   domains: ['thumbzilla.com'], language: 'en',
   network: {mode: 'auto', origin: 'https://www.thumbzilla.com', vpnHint: true}, imageHeaders: {Referer: 'https://www.thumbzilla.com/'},
@@ -38,7 +38,14 @@ Park.register({
     if (!r.ok) throw Park.error('HTTP', '成人视频请求失败');
     const finalUrl = Park.url.response(this, r, url);
     if (r.body.length > 4 * 1024 * 1024) throw Park.error('PARSE', '影片页面过大');
-    return {html: r.body, doc: Park.html.parse(r.body), url: finalUrl.href};
+    const doc = Park.html.parse(r.body);
+    if (finalUrl.pathname === '/' && new URL(url).pathname !== '/') {
+      const notice = Park.html.text(doc.querySelector('body'));
+      if (/disable access to our website/i.test(notice) && /verify your age|age verification/i.test(notice)) {
+        throw Park.error('BLOCKED', '访问受限');
+      }
+    }
+    return {html: r.body, doc, url: finalUrl.href};
   },
   // 图片与视频 CDN 会更换主机，只要求是公网 HTTPS 地址，播放按会话授权。
   coverUrl(value) { return ((value, base) => { try { const u = new URL(String(value).trim(), base); return Park.url.parse(u.href, base, [u.hostname]); } catch (_) { return null; } })(value, this.BASE)?.href || ''; },

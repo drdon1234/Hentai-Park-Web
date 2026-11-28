@@ -67,6 +67,8 @@ public struct InstalledSite: Identifiable, Sendable {
   public let related: Bool
   public let gameResources: Bool
   public let thumbnails: Bool
+  public let album: Bool
+  public let interaction: Bool
   public let random: Bool
   fileprivate let resolveLink: Bool
   public let subscriptionUpdates: Bool
@@ -101,6 +103,8 @@ public struct InstalledSite: Identifiable, Sendable {
     related = site["related"] as? Bool == true
     gameResources = site["gameResources"] as? Bool == true
     thumbnails = site["thumbnails"] as? Bool == true
+    album = site["album"] as? Bool == true
+    interaction = site["interaction"] as? Bool == true
     random = site["random"] as? Bool == true
     resolveLink = site["resolveLink"] as? Bool == true
     subscriptionUpdates = site["subscriptionUpdates"] as? Bool == true
@@ -164,6 +168,29 @@ extension ProgressSession {
     return try await run { _, request in
       try library.service(directory: root, request: request).translateText(text: name, target: target, request: request)
     }
+  }
+
+  static func translationSegments(_ text: String) -> [String] {
+    var parts: [String] = []
+    var part = String.UnicodeScalarView()
+    var units = 0
+    for scalar in text.unicodeScalars {
+      let width = scalar.value > 0xffff ? 2 : 1
+      if units + width > 1000 { parts.append(String(part)); part = String.UnicodeScalarView(); units = 0 }
+      part.append(scalar); units += width
+    }
+    if !part.isEmpty { parts.append(String(part)) }
+    return parts
+  }
+
+  public func translateVisibleText(_ text: String, locale: String, library: SourceLibrary) async throws -> String {
+    var translated = ""
+    for chunk in Self.translationSegments(text) {
+      try Task.checkCancellation()
+      if chunk.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { translated += chunk }
+      else { translated += try await translateTag(chunk, locale: locale, library: library) }
+    }
+    return translated
   }
 
   public func blockTag(_ value: String) async throws {
@@ -304,7 +331,7 @@ public struct SiteWork: Decodable, Identifiable, Sendable {
   fileprivate var listingData: Data?
   fileprivate var summary: Data?
   fileprivate var bodyData: Data?
-  fileprivate var subscriptionPost = false
+  var subscriptionPost = false
 
   func listingField(_ name: String) -> Any? {
     guard let listingData, let row = try? JSONSerialization.jsonObject(with: listingData) as? [String: Any] else { return nil }
@@ -538,6 +565,13 @@ extension ProgressSession {
     }
   }
 
+  public func setSiteEnabled(_ library: SourceLibrary, key: String, enabled: Bool) async throws {
+    let root = directory
+    try await run { _, request in
+      try library.service(directory: root, request: request).setPluginEnabled(key: key, enabled: enabled, request: request)
+    }
+  }
+
   #if os(macOS) || os(iOS)
   public func clearCookies(_ library: SourceLibrary, source: String) async throws {
     let root = directory
@@ -750,7 +784,7 @@ extension ProgressSession {
         where error.code == .fileReadNoSuchFile
       { settings = "{}" }
       let filter = try ContentFilter(settingsJson: settings)
-      return source.filter { filter.firstMatch(title: $0.title, tags: $0.tags ?? []) == nil }
+      return source.filter { filter.workMatch(source: sourceKey, id: $0.id, title: $0.title, tags: $0.tags ?? [], authors: $0.authors ?? []) == nil }
     }
     return SiteWorkPage(
       items: items,
@@ -793,7 +827,7 @@ extension ProgressSession {
     return try await decodeSiteDetail(fields, site: site, summaryKeys: keys)
   }
 
-  private func decodeSiteDetail(_ fields: [String: Any], site: String, summaryKeys: Set<String>) async throws -> SiteWork {
+  func decodeSiteDetail(_ fields: [String: Any], site: String, summaryKeys: Set<String>) async throws -> SiteWork {
     var work = try JSONDecoder().decode(SiteWork.self, from: JSONSerialization.data(withJSONObject: fields))
     guard !work.title.isEmpty else { throw SiteReadError.malformed }
     if let flag = fields["commentsAvailable"] as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() {

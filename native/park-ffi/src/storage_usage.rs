@@ -1,7 +1,7 @@
 use crate::{ProgressStore, StorageError};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
-use std::{collections::HashMap, fs, io, path::{Component, Path, PathBuf}};
+use park_storage::game_downloads::directory as game_directory;
+use std::{collections::HashMap, fs, io, path::Path};
 
 #[derive(uniffi::Record)]
 pub struct StorageUsage {
@@ -38,24 +38,6 @@ fn records(path: &Path) -> Result<Vec<Value>, StorageError> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(vec![]),
         _ => Err(StorageError::IoFailure),
     }
-}
-
-fn game_directory(row: &Value) -> Option<PathBuf> {
-    let path = Path::new(row["directory"].as_str()?);
-    if !path.is_absolute() || path.components().any(|v| v == Component::ParentDir) { return None; }
-    let mut suffix = PathBuf::from("games");
-    for key in [&row["item"]["source"], &row["item"]["id"], &row["resourceId"], &row["channelId"]] {
-        suffix.push(format!("{:x}",Sha256::digest(key.as_str()?.as_bytes())));
-    }
-    if !path.ends_with(&suffix) { return None; }
-    for dir in path.ancestors().take(5) {
-        match fs::symlink_metadata(dir) {
-            Ok(meta) if meta.is_dir() => (),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => (),
-            _ => return None,
-        }
-    }
-    Some(path.to_owned())
 }
 
 #[uniffi::export]

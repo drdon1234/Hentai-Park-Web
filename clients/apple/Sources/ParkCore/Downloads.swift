@@ -174,6 +174,30 @@ extension ProgressSession {
     }
   }
 
+  public func videoDownloadInfo(_ work: LibraryWork) async throws -> DownloadRowInfo {
+    guard work.media == "video", work.downloaded else { throw SiteReadError.malformed }
+    return try await run { store, _ in try store.downloadRowInfo(source: work.source, work: work.workId) }
+  }
+
+  public func chooseVideoDownloadLine(key: ChapterKey, lines: VideoLines, index: UInt32) async throws {
+    try await run { store, _ in try store.chooseVideoDownloadLine(key: key, lines: lines, index: index) }
+  }
+
+  public func exportedVideoEpisode(_ key: ChapterKey) async throws -> URL {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+    do {
+      let file = try await run { store, request in
+        try store.exportVideoEpisode(key: key, destination: folder.path, request: request)
+      }
+      try FileManager.default.setAttributes([.posixPermissions: 0o400], ofItemAtPath: file)
+      return URL(fileURLWithPath: file)
+    } catch {
+      try? FileManager.default.removeItem(at: folder)
+      throw error
+    }
+  }
+
   public func changeQueue(_ works: [LibraryWork], resume: Bool) async throws {
     let targets = works.map { DownloadTarget(source: $0.source, work: $0.workId) }
     let changed = try await run { store, _ in try store.changeDownloadQueue(targets: targets, resume: resume) }
@@ -198,6 +222,17 @@ extension ProgressSession {
     downloadRequests[work.libraryID]?.values.forEach { $0.cancel() }
     try await run { store, _ in
       _ = try store.deleteDownload(source: work.source, workId: work.workId, chapters: [])
+    }
+  }
+
+  public func removeDownloadedChapters(_ ids: Set<String>, from work: LibraryWork) async throws {
+    guard !ids.isEmpty, work.downloaded, !work.invalidDownload,
+          ids.isSubset(of: Set(work.chapters.map(\.id)).union(work.pendingDeletion ?? [])) else {
+      throw CocoaError(.coderInvalidValue)
+    }
+    let ordered = ids.sorted()
+    try await run { store, _ in
+      _ = try store.deleteDownload(source: work.source, workId: work.workId, chapters: ordered)
     }
   }
 

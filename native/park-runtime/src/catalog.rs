@@ -1,4 +1,4 @@
-use crate::{Error, Invocation, NativeHost, SourceRuntime};
+use crate::{BrowserTransport, Error, Invocation, NativeHost, SourceRuntime};
 mod install;
 mod settings;
 pub use install::{release, PluginPreview};
@@ -35,6 +35,7 @@ pub struct SourceCatalog {
     polyfills: String,
     sessions: Arc<Sessions>,
     transport: Arc<Transport>,
+    browser: Option<Arc<dyn BrowserTransport>>,
     writers: Mutex<HashMap<String, Weak<Mutex<()>>>>,
 }
 fn read_script(root: &Path, key: &str, digest: &str) -> Result<String, Error> {
@@ -89,6 +90,23 @@ impl SourceCatalog {
             polyfills,
             sessions,
             transport,
+            browser: None,
+            writers: Mutex::default(),
+        }
+    }
+    pub fn new_with_browser(
+        root: &Path,
+        polyfills: String,
+        sessions: Arc<Sessions>,
+        transport: Arc<Transport>,
+        browser: Arc<dyn BrowserTransport>,
+    ) -> Self {
+        Self {
+            root: root.to_owned(),
+            polyfills,
+            sessions,
+            transport,
+            browser: Some(browser),
             writers: Mutex::default(),
         }
     }
@@ -109,6 +127,11 @@ impl SourceCatalog {
         let mut entries = self.registered()?;
         entries.retain(|s| s.enabled != Some(false));
         Ok(entries)
+    }
+    pub fn management_manifest(&self, key: &str, call: Invocation) -> Result<Value, Error> {
+        let _gate = self.lock(false, &call)?;
+        let entry = self.registered()?.into_iter().find(|s| s.key == key).ok_or(Error::Config)?;
+        installed_manifest(&self.root, key, &entry.sha256, &self.polyfills, call)
     }
     pub fn library_source_kinds(&self, keys: &[String], call: Invocation) -> Result<HashMap<String, String>, Error> {
         let _gate = self.lock(false, &call)?;
@@ -161,8 +184,20 @@ impl SourceCatalog {
     pub fn invoke_identified(
         &self, key: &str, method: &str, args: &[Value], call: Invocation, expected_digest: Option<&str>,
     ) -> Result<(Value, Value, String), Error> {
+        self.run_method(key, method, args, call, expected_digest, None)
+    }
+
+    pub fn set_managed_account(&self, key: &str, enabled: bool, call: Invocation) -> Result<Value, Error> {
+        let (_, result, _) = self.run_method(key, "account.enableManaged", &[], call, None, Some(enabled))?;
+        Ok(result)
+    }
+
+    fn run_method(
+        &self, key: &str, method: &str, args: &[Value], call: Invocation, expected_digest: Option<&str>,
+        managed: Option<bool>,
+    ) -> Result<(Value, Value, String), Error> {
         call.check()?;
-        let _restore = self.lock(false, &call)?;
+        let _restore = self.lock(managed.is_some() || method == "account.logout", &call)?;
         if !crate::source_key(key) {
             return Err(Error::Config);
         }
@@ -203,6 +238,20 @@ impl SourceCatalog {
         }
         let script = bytes.trim_start_matches('\u{feff}');
         let manifest = SourceRuntime::inspect(key, script, &self.polyfills, call.clone())?;
+        if method == "account.enableManaged" {
+            let enabled = managed.ok_or(Error::Unsupported)?;
+            if manifest["account"]["managedAccount"] != true {
+                return Err(Error::Unsupported);
+            }
+            let mut state = crate::SourceState::open(&self.root, key)?;
+            if enabled && !state.snapshot()["data"]["credentials"].is_null() {
+                return Err(Error::Config);
+            }
+            state.set_option("managedAccount", enabled.into(), &call)?;
+            if !enabled {
+                return Ok((manifest, serde_json::json!({"ok":true,"value":null}), digest));
+            }
+        }
         let domains = manifest["domains"]
             .as_array()
             .into_iter()
@@ -210,7 +259,7 @@ impl SourceCatalog {
             .filter_map(Value::as_str)
             .map(str::to_owned)
             .collect();
-        let host = Rc::new(NativeHost::registered(
+        let host = Rc::new(NativeHost::registered_with_browser(
             &self.root,
             key,
             domains,
@@ -221,6 +270,7 @@ impl SourceCatalog {
                 .install_generation
                 .as_deref()
                 .or(Some(source.sha256.as_str())),
+            self.browser.clone(),
         )?);
         let mut engine = SourceRuntime::open(
             key,
@@ -243,11 +293,20 @@ impl SourceCatalog {
         } else {
             engine.invoke(method, args, call.clone())?
         };
-        engine.close(call)?;
+        engine.close(call.clone())?;
         if result["ok"] == true {
             let partition = || self.sessions.partition(key, park_net::Purpose::Source);
             match method {
-                "account.logout" => partition()?.clear()?,
+                "account.logout" => {
+                    partition()?.clear()?;
+                    if manifest["account"]["managedAccount"] == true {
+                        let mut state = crate::SourceState::open(&self.root, key)?;
+                        if state.snapshot()["settings"]["managedAccount"] == true {
+                            state.set_option("managedAccount", false.into(), &call)?;
+                        }
+                    }
+                }
+                "account.enableManaged" => partition()?.invalidate()?,
                 "account.login" => partition()?.invalidate()?,
                 _ => {}
             }

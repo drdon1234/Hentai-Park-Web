@@ -1,4 +1,4 @@
-use crate::{Capabilities, Error, Invocation, SourceState};
+use crate::{BrowserTransport, Capabilities, Error, Invocation, SourceState};
 use base64::prelude::{Engine, BASE64_STANDARD};
 use http::{HeaderMap, HeaderName, HeaderValue, Method};
 use park_net::{Purpose, Request, Session, Sessions, Transport};
@@ -28,6 +28,7 @@ pub struct NativeHost {
     state: RefCell<SourceState>,
     session: Session,
     transport: Arc<Transport>,
+    browser: Option<Arc<dyn BrowserTransport>>,
     io: tokio::runtime::Runtime,
 }
 impl NativeHost {
@@ -49,6 +50,20 @@ impl NativeHost {
         transport: Arc<Transport>,
         generation: Option<&str>,
     ) -> Result<Self, Error> {
+        Self::registered_with_browser(
+            root, owner, domains, chat_domains, sessions, transport, generation, None,
+        )
+    }
+    pub(crate) fn registered_with_browser(
+        root: &Path,
+        owner: &str,
+        domains: Vec<String>,
+        chat_domains: Value,
+        sessions: &Sessions,
+        transport: Arc<Transport>,
+        generation: Option<&str>,
+        browser: Option<Arc<dyn BrowserTransport>>,
+    ) -> Result<Self, Error> {
         let state = SourceState::open(root, owner)?;
         let session = sessions.partition(owner, Purpose::Source)?;
         let checkpoint = park_storage::recovery::checkpoint(root).map_err(|_| Error::Storage)?;
@@ -68,6 +83,7 @@ impl NativeHost {
             state: RefCell::new(state),
             session,
             transport,
+            browser,
             io,
         })
     }
@@ -77,7 +93,7 @@ impl NativeHost {
 
     fn request(&self, args: Value, call: &Invocation) -> Result<Value, Error> {
         if args["mode"].as_str() == Some("browser") {
-            return Err(Error::Unsupported);
+            return self.browser_request(args, call);
         }
         let mut headers = HeaderMap::new();
         if let Some(map) = args["headers"].as_object() {
@@ -159,6 +175,112 @@ impl NativeHost {
         Ok(
             json!({"status":response.status.as_u16(),"url":response.url.as_str(),"body":body,"headers":headers}),
         )
+    }
+
+    fn browser_request(&self, args: Value, call: &Invocation) -> Result<Value, Error> {
+        let browser = self.browser.as_ref().ok_or(Error::Unsupported)?;
+        let url = Url::parse(args["url"].as_str().ok_or(Error::Config)?)
+            .map_err(|_| Error::Config)?;
+        let origin = Url::parse(args["origin"].as_str().ok_or(Error::Config)?)
+            .map_err(|_| Error::Config)?;
+        if !park_net::public_https(&url)
+            || !park_net::public_https(&origin)
+            || origin.path() != "/"
+            || origin.query().is_some()
+            || origin.origin() != url.origin()
+        {
+            return Err(Error::Blocked);
+        }
+        park_net::authorize(&url, &self.domains).map_err(|_| Error::Blocked)?;
+        let method = Method::from_bytes(
+            args["method"]
+                .as_str()
+                .unwrap_or("GET")
+                .to_ascii_uppercase()
+                .as_bytes(),
+        )
+        .map_err(|_| Error::Config)?;
+        let body = args["body"].as_str();
+        if args["connectAddress"].is_string()
+            || args["bodyBase64"].is_string()
+            || args["followRedirects"].as_bool() == Some(false)
+            || (!matches!(method, Method::GET | Method::HEAD)
+                && !(method == Method::POST
+                    && args["readOnly"] == true
+                    && body.is_some()))
+        {
+            return Err(Error::Blocked);
+        }
+        if body.is_some_and(|v| v.len() > 2 * 1024 * 1024) {
+            return Err(Error::Network);
+        }
+        let mut headers = serde_json::Map::new();
+        if let Some(map) = args["headers"].as_object() {
+            for (name, value) in map {
+                let key = name.to_ascii_lowercase();
+                if matches!(key.as_str(), "cookie" | "authorization" | "proxy-authorization") {
+                    continue;
+                }
+                HeaderName::from_bytes(name.as_bytes()).map_err(|_| Error::Config)?;
+                let value = value.as_str().ok_or(Error::Config)?;
+                HeaderValue::from_str(value).map_err(|_| Error::Config)?;
+                headers.insert(name.clone(), Value::String(value.to_owned()));
+            }
+        }
+        let timeout = Duration::from_millis(args["timeout"].as_u64().unwrap_or(30_000))
+            .min(call.remaining());
+        let payload = json!({
+            "url": url.as_str(),
+            "origin": origin.as_str(),
+            "domains": &self.domains,
+            "method": method.as_str(),
+            "headers": headers,
+            "body": body,
+            "timeoutMs": timeout.as_millis().min(u128::from(u32::MAX)),
+        });
+        call.check()?;
+        let response = browser.request(&self.owner, payload, call)?;
+        call.check()?;
+        let status = response["status"].as_u64().ok_or(Error::Network)?;
+        let final_url = Url::parse(response["url"].as_str().ok_or(Error::Network)?)
+            .map_err(|_| Error::Network)?;
+        if status > 599
+            || !park_net::public_https(&final_url)
+            || final_url.scheme() != url.scheme()
+            || park_net::authorize(&final_url, &self.domains).is_err()
+        {
+            return Err(Error::Blocked);
+        }
+        let encoded = response["bodyBase64"].as_str().ok_or(Error::Network)?;
+        if encoded.len() > 22_369_624 {
+            return Err(Error::Network);
+        }
+        let bytes = BASE64_STANDARD.decode(encoded).map_err(|_| Error::Network)?;
+        if bytes.len() > 16 * 1024 * 1024 {
+            return Err(Error::Network);
+        }
+        let body = if args["responseType"].as_str() == Some("base64") {
+            encoded.to_owned()
+        } else {
+            let charset = response["headers"]
+                .as_object()
+                .and_then(|headers| headers.get("content-type"))
+                .and_then(Value::as_str)
+                .and_then(|value| {
+                    value
+                        .split(';')
+                        .skip(1)
+                        .filter_map(|part| part.trim().split_once('='))
+                        .find(|(key, _)| key.trim().eq_ignore_ascii_case("charset"))
+                })
+                .and_then(|(_, value)| {
+                    encoding_rs::Encoding::for_label(value.trim().trim_matches('"').as_bytes())
+                })
+                .unwrap_or(encoding_rs::UTF_8);
+            charset.decode(&bytes).0.into_owned()
+        };
+        let headers = response["headers"].clone();
+        Ok(json!({"status": status, "url": final_url.as_str(), "body": body, "headers": headers}))
     }
 }
 

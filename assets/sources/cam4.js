@@ -64,7 +64,7 @@ Park.register({
     "未知直播列表": "قائمة بث غير معروفة"
   }
 },
-  key: 'cam4', name: 'CAM4', version: '0.0.9', minAppVersion: '0.13.6', type: 'video', category: 'live', language: 'en',
+  key: 'cam4', name: 'CAM4', version: '0.0.10', minAppVersion: '0.13.6', type: 'video', category: 'live', language: 'en',
   chat: {domains: ['identitytoolkit.googleapis.com', 'cam4.firebaseio.com', ...Array.from({length: 10}, (_, i) => 'cam4-' + (i + 1) + '.firebaseio.com')]},
   color: '#ff5a5f', description: '公开直播间', homepage: 'https://www.cam4.com/',
   domains: ['cam4.com'], network: {mode: 'auto', origin: 'https://www.cam4.com', vpnHint: true},
@@ -85,7 +85,7 @@ Park.register({
   validId(value) { const id = String(value || ''); if (!/^[A-Za-z0-9_]{1,80}$/.test(id)) throw Park.error('NOT_FOUND', '直播间不存在'); return id; },
   item(row) {
     const id = String(row?.username || ''), cover = String(row?.preview?.poster || '');
-    if (!/^[A-Za-z0-9_]{1,80}$/.test(id) || !cover || row.showType !== 'PUBLIC_SHOW') return null;
+    if (!/^[A-Za-z0-9_]{1,80}$/.test(id) || row.showType !== 'PUBLIC_SHOW') return null;
     return {id, title: id, cover, coverAspect: 16 / 9,
       url: 'https://www.cam4.com/' + id, mediaKind: 'video', chapters: null};
   },

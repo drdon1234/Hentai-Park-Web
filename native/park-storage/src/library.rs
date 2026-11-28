@@ -61,7 +61,7 @@ pub fn save_classified_summary(
     let id = upsert_summary(&tx, source, detail)?;
     match favorite {
         Some(value) => {
-            tx.execute("UPDATE works SET favorite=?,favorited_at=? WHERE source=? AND id=? AND favorite!=?",params![value,value.then_some(now),source,id,value])?;
+            set_existing_favorite(&tx, source, id, value, now)?;
         }
         None => {
             tx.execute("INSERT INTO history(source,work_id,time) VALUES(?,?,?) ON CONFLICT(source,work_id) DO UPDATE SET time=MAX(time,excluded.time)",params![source,id,now])?;
@@ -86,6 +86,15 @@ pub fn replace_categories(tx: &Transaction<'_>, source: &str, id: &str, categori
             SELECT ?,?,id FROM categories WHERE id=?", params![source,id,category])? != 1 {
             return Err(rusqlite::Error::QueryReturnedNoRows);
         }
+    }
+    Ok(())
+}
+
+pub fn set_existing_favorite(db: &Connection, source: &str, id: &str, enabled: bool, now: i64) -> rusqlite::Result<()> {
+    let changed = db.execute("UPDATE works SET favorite=?,favorited_at=? WHERE source=? AND id=? AND favorite!=?",
+        params![enabled, enabled.then_some(now), source, id, enabled])?;
+    if changed == 0 {
+        db.query_row("SELECT 1 FROM works WHERE source=? AND id=? AND favorite=?", params![source,id,enabled], |_| Ok(()))?;
     }
     Ok(())
 }

@@ -44,6 +44,9 @@ import SwiftUI
       } else if error == nil { ProgressView().padding() }
       if operation != nil { ProgressView().padding() }
     }.padding(.vertical).disabled(operation != nil).interactiveDismissDisabled(operation != nil)
+    #if os(macOS)
+    .frame(minWidth: 420, idealWidth: 520, minHeight: 320, idealHeight: 420)
+    #endif
     .opacity(obscured ? 0 : 1).accessibilityHidden(obscured)
     .task(id: attempt) {
       do {

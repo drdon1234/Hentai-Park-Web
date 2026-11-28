@@ -1,4 +1,8 @@
 {
+  "当前窗口的方向由系统管理": "The system controls orientation for this window.",
+  "本页没有新增预览，可继续加载": "This page has no new previews. You can load more.",
+  "开始日期": "Start date",
+  "结束日期": "End date",
   "删除选中的历史记录？": "Delete the selected history entries?",
   "清空此范围的访问历史？": "Clear the visit history for this scope?",
   "上移": "Move up",
@@ -304,6 +308,7 @@
   "导出诊断日志": "Export diagnostic log",
   "尚未检查过更新": "Not checked yet",
   "尚未自动备份过": "No automatic backup yet",
+  "Windows 显示设置": "Windows display settings",
   "屏幕刷新率": "Screen refresh rate",
   "屏幕方向": "Screen orientation",
   "屏蔽「{label}」": "Block \"{label}\"",

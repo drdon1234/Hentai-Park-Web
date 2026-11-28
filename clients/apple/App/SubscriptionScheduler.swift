@@ -6,6 +6,11 @@
   import UserNotifications
 
   @MainActor final class ParkAppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+      let scene = window?.windowScene
+      if let scene, let mask = ReaderSceneOrientation.Monitor.owners.object(forKey: scene)?.mask { return mask }
+      return ReaderSceneOrientation.Monitor.systemMask(scene)
+    }
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
       UNUserNotificationCenter.current().delegate = SubscriptionNotifications.shared
       BGTaskScheduler.shared.register(forTaskWithIdentifier: SubscriptionScheduler.identifier, using: .main) { task in
@@ -85,6 +90,61 @@
         worker = nil
         task.setTaskCompleted(success: success && !Task.isCancelled)
       }
+    }
+  }
+#elseif os(macOS)
+  import Foundation
+  import ParkCore
+
+  @MainActor final class SubscriptionScheduler {
+    static let shared = SubscriptionScheduler()
+    private var scheduledHours = 0
+    private var version = UUID()
+    private var activity: NSBackgroundActivityScheduler?
+    private var worker: Task<Bool, Never>?
+
+    func schedule(hours: Int) async {
+      guard hours != scheduledHours else { return }
+      activity?.invalidate()
+      activity = nil
+      worker?.cancel()
+      worker = nil
+      version = UUID()
+      scheduledHours = hours
+      guard hours > 0 else { return }
+      let scheduler = NSBackgroundActivityScheduler(identifier: "com.hentaipark.subscriptions")
+      scheduler.interval = TimeInterval(hours) * 3600
+      scheduler.repeats = true
+      activity = scheduler
+      Self.register(scheduler, version: version)
+    }
+
+    private nonisolated static func register(_ scheduler: NSBackgroundActivityScheduler, version: UUID) {
+      scheduler.schedule { complete in
+        Task { @MainActor in
+          let result = await shared.check(version: version)
+          complete(result ? .finished : .deferred)
+        }
+      }
+    }
+
+    private func check(version request: UUID) async -> Bool {
+      guard request == version, let activity, !activity.shouldDefer, worker == nil else { return false }
+      let next = Task {
+        guard let library = InstalledSources.library,
+              let session = try? await ProgressSession.openApplicationLibrary() else { return false }
+        let result: Bool
+        do {
+          try Task.checkCancellation()
+          result = try await session.checkSubscriptions(library, force: false)
+        } catch { result = false }
+        await session.close()
+        return result
+      }
+      worker = next
+      let result = await next.value
+      if request == version { worker = nil }
+      return result
     }
   }
 #endif

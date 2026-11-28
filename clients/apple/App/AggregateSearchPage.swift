@@ -18,6 +18,7 @@ import SwiftUI
   @State private var reload = 0
   @State private var active: AggregateSearch?
   @State private var rows: [SiteSearchSection] = []
+  @State private var group: String?
   @State private var selected: (site: InstalledSite, item: SiteWork)?
   @State private var choosing = false
   @State private var excluded = Set<String>()
@@ -36,17 +37,24 @@ import SwiftUI
       } else {
         VStack(alignment: .leading) {
           HStack {
-            Button(tr("返回"), action: back)
-            TextField(tr("搜索"), text: $query).onSubmit(submit)
-            Button(tr("搜索"), action: submit).disabled(scope == nil)
-            if category == nil { Button(tr("站点")) { excluded = scope?.excluded ?? []; choosing = true }.disabled(scope == nil) }
+            Button(tr("返回")) {
+              if group != nil { group = nil } else { back() }
+            }
+            if let group, let row = rows.first(where: { $0.id == group }) {
+              Text(row.site.name ?? row.id).font(.headline)
+            } else {
+              TextField(tr("搜索"), text: $query).onSubmit(submit)
+                .accessibilityIdentifier("aggregate-keyword")
+              Button(tr("搜索"), action: submit).disabled(scope == nil)
+              if category == nil { Button(tr("站点")) { excluded = scope?.excluded ?? []; choosing = true }.disabled(scope == nil) }
+            }
           }.padding(.horizontal)
           if let status {
             Text(tr(status)).padding(.horizontal)
             if scope == nil { Button(tr("重试")) { reload += 1 } }
           } else if scope == nil { ProgressView() }
           List {
-            ForEach(rows) { row in
+            ForEach(rows.filter { group == nil || $0.id == group }) { row in
               Section(header: Text(row.site.name ?? row.site.key)) {
                 ForEach(row.items) { item in
                   if metadataOnly ? row.site.metadataDetail : row.site.detail { Button(item.title) { selected = (row.site, item) } }
@@ -56,6 +64,10 @@ import SwiftUI
                 else if let error = row.error {
                   Text(tr(siteMessage(error)))
                   Button(tr("重试")) { Task { await active?.more(site: row.id) } }
+                } else if row.hasNext && group == nil && rows.count > 1 {
+                  Button(tr("查看全部结果")) { group = row.id }
+                    .accessibilityHint(row.site.name ?? row.id)
+                    .accessibilityIdentifier("results:" + row.id)
                 } else if row.hasNext {
                   Button(tr("加载更多")) { Task { await active?.more(site: row.id) } }
                 } else if row.items.isEmpty { Text(tr("暂无内容")) }
@@ -119,6 +131,7 @@ import SwiftUI
 
   private func submit() {
     guard scope != nil else { return }
+    group = nil
     term = query.trimmingCharacters(in: .whitespacesAndNewlines)
     rows = []
     revision += 1

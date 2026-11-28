@@ -36,7 +36,7 @@ pub fn public_address(address: IpAddr) -> bool {
     }
 }
 
-pub(crate) fn authorize(url: &Url, domains: &[String]) -> Result<(), Error> {
+pub fn authorize(url: &Url, domains: &[String]) -> Result<(), Error> {
     let host = url.host_str().ok_or(Error::Blocked)?.trim_end_matches('.');
     if !matches!(url.scheme(), "https" | "http")
         || !url.username().is_empty()

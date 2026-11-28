@@ -93,3 +93,51 @@ extension ProgressSession {
       reset: info.reset == true, orders: info.sorts ?? [])
   }
 }
+
+/// 同一作品的初始预览、远端页号与自动加载开关。重复页保留手动继续入口。
+public struct PreviewPager: Sendable {
+  private enum Identity: Hashable {
+    case index(Int)
+    case sprite(String, Double?, Double?)
+  }
+
+  public private(set) var items: [SiteThumbnail]
+  public private(set) var hasNext: Bool
+  public private(set) var automatic = false
+  public private(set) var nextRemotePage = 1
+  private let local: [SiteThumbnail]
+  private let remote: Bool
+  private let total: Int?
+
+  public init(local: [SiteThumbnail] = [], remote: Bool = false, total: Int? = nil) {
+    self.local = local
+    self.remote = remote
+    self.total = total
+    let initial = Array(local.prefix(20))
+    items = initial
+    hasNext = local.count > initial.count || (remote && (total.map { $0 > initial.count } ?? true))
+  }
+
+  public mutating func startManually() { automatic = true }
+  public mutating func stopAutomatic() { automatic = false }
+
+  public mutating func appendLocal() -> Bool {
+    guard items.count < local.count else { return false }
+    items = Array(local.prefix(items.count + 40))
+    hasNext = items.count < local.count || (remote && (total.map { $0 > items.count } ?? true))
+    return true
+  }
+
+  public mutating func append(_ page: SiteThumbnailPage) {
+    func identity(_ item: SiteThumbnail) -> Identity {
+      if let index = item.index { return .index(index) }
+      return .sprite(item.url, item.offsetX, item.offsetY)
+    }
+    var seen = Set(items.map(identity))
+    let additions = page.thumbnails.filter { seen.insert(identity($0)).inserted }
+    if additions.isEmpty { automatic = false }
+    items.append(contentsOf: additions)
+    nextRemotePage += 1
+    hasNext = page.hasNext == true
+  }
+}

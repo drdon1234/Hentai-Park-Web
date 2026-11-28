@@ -270,7 +270,7 @@ pub fn view(
             continue;
         };
         let mut row = json!({"id":id,"source":r["item"]["source"],"work":r["item"]["id"],"title":r["item"]["title"],
-            "status":r["status"],"seconds":r["seconds"],"bytes":r["bytes"],"volumes":[]});
+            "status":r["status"],"startedAt":r["startedAt"],"seconds":r["seconds"],"bytes":r["bytes"],"volumes":[]});
         if let Ok(dir) = path_for(r) {
             let ids = volumes(&dir)?;
             if matches!(r["status"].as_str(), Some("recording" | "stopping"))

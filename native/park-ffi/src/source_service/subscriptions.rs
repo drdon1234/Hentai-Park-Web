@@ -53,7 +53,7 @@ fn account_identity(v: &Value) -> Value {
     }
 }
 impl SourceService {
-    fn context_hash(&self, store: &ProgressStore, key: &str, manifest: &Value) -> Result<String> {
+    pub(super) fn context_hash(&self, store: &ProgressStore, key: &str, manifest: &Value) -> Result<String> {
         let state = park_runtime::SourceState::open(&store.root, key)?;
         let data = state.snapshot();
         let account = data["data"].as_object().map(|obj| {
@@ -120,16 +120,10 @@ impl SourceService {
         let hash = self
             .context_hash(store, &t.source, &manifest)
             .map_err(|_| "CONFIG")?;
-        let mut state = {
-            let mut db = store.lock().map_err(|_| "CONFIG")?;
-            sub::begin(&mut db, &t.id, lease, &hash).map_err(|_| "CONFIG")?
-        };
-        let mut cursors: HashSet<String> = state.progress.cursor.iter().cloned().collect();
-        let mut complete = false;
-        for page in 0..3 {
+        scan_subscription(store, t, lease, hours, &hash, |cursor| {
             let args = [
                 json!({"dimension":t.dimension,"target":t.target}),
-                json!({"cursor":state.progress.cursor}),
+                json!({"cursor":cursor}),
             ];
             let (_, response) = self
                 .catalog
@@ -138,79 +132,99 @@ impl SourceService {
                     park_runtime::Error::Cancelled => "CANCELLED",
                     _ => "NETWORK",
                 })?;
-            if response["ok"] != true {
-                return Err(match response["error"]["code"].as_str() {
-                    Some("LOGIN_REQUIRED") => "LOGIN_REQUIRED",
-                    Some("HTTP") => "HTTP",
-                    Some("BLOCKED") => "BLOCKED",
-                    Some("CLOUDFLARE") => "CLOUDFLARE",
-                    Some("CONFIG") => "CONFIG",
-                    Some("PARSE") => "PARSE",
-                    Some("UNSUPPORTED") => "UNSUPPORTED",
-                    Some("NOT_FOUND") => "NOT_FOUND",
-                    _ => "NETWORK",
-                });
+            Ok(response)
+        }, || {
+            let manifest = self
+                .catalog
+                .manifest(&t.source, budget()?)
+                .map_err(|_| "CANCELLED")?;
+            if self
+                .context_hash(store, &t.source, &manifest)
+                .map_err(|_| "CONFIG")?
+                != hash
+            {
+                return Err("CANCELLED");
             }
-            let value = &response["value"];
-            let list = value["items"]
-                .as_array()
-                .filter(|a| a.len() <= 20000)
-                .ok_or("PARSE")?;
-            let has_next = value["hasNext"].as_bool().ok_or("PARSE")?;
-            let mut all_seen = !list.is_empty();
-            for val in list {
-                let item: sub::Item = serde_json::from_value(val.clone()).map_err(|_| "PARSE")?;
-                if !item.valid() {
-                    return Err("PARSE");
-                }
-                all_seen &= state.seen.contains(&item.id);
-                state.progress.items.push(item);
-            }
-            complete = !has_next
-                || value["windowed"] == true
-                    && ((!state.baseline && page == 2) || state.baseline && all_seen);
-            if complete {
-                break;
-            }
-            let next = value["cursor"]
-                .as_str()
-                .filter(|s| !s.is_empty() && s.encode_utf16().count() <= 4096)
-                .ok_or("PARSE")?;
-            if !cursors.insert(next.to_owned()) {
-                return Err("PARSE");
-            }
-            state.progress.cursor = Some(next.into());
-            if page < 2 {
-                std::thread::sleep(Duration::from_millis(300))
-            }
-        }
-        let manifest = self
-            .catalog
-            .manifest(&t.source, budget()?)
-            .map_err(|_| "CANCELLED")?;
-        if self
-            .context_hash(store, &t.source, &manifest)
-            .map_err(|_| "CONFIG")?
-            != hash
-        {
-            return Err("CANCELLED");
-        }
-        let mut db = store.lock().map_err(|_| "CONFIG")?;
-        budget()?;
-        sub::commit(
-            &mut db,
-            t,
-            lease,
-            state,
-            complete,
-            now_ms().map_err(|_| "CONFIG")?,
-            hours,
-        )
-        .map_err(|e| match e {
-            park_storage::backup::Error::Invalid => "PARSE",
-            _ => "CONFIG",
+            budget()?;
+            Ok(())
         })
     }
+}
+fn scan_subscription(
+    store: &ProgressStore, t: &sub::Target, lease: &str, hours: i64, hash: &str,
+    fetch: impl Fn(Option<&str>) -> std::result::Result<Value, &'static str>,
+    verify_context: impl Fn() -> std::result::Result<(), &'static str>,
+) -> std::result::Result<bool, &'static str> {
+    let mut state = {
+        let mut db = store.lock().map_err(|_| "CONFIG")?;
+        sub::begin(&mut db, &t.id, lease, hash).map_err(|_| "CONFIG")?
+    };
+    let mut cursors: HashSet<String> = state.progress.cursor.iter().cloned().collect();
+    let mut complete = false;
+    for page in 0..3 {
+        let response = fetch(state.progress.cursor.as_deref())?;
+        if response["ok"] != true {
+            return Err(match response["error"]["code"].as_str() {
+                Some("CANCELLED") => "CANCELLED",
+                Some("LOGIN_REQUIRED") => "LOGIN_REQUIRED",
+                Some("HTTP") => "HTTP",
+                Some("BLOCKED") => "BLOCKED",
+                Some("CLOUDFLARE") => "CLOUDFLARE",
+                Some("CONFIG") => "CONFIG",
+                Some("PARSE") => "PARSE",
+                Some("UNSUPPORTED") => "UNSUPPORTED",
+                Some("NOT_FOUND") => "NOT_FOUND",
+                _ => "NETWORK",
+            });
+        }
+        let value = &response["value"];
+        let list = value["items"]
+            .as_array()
+            .filter(|a| a.len() <= 20000)
+            .ok_or("PARSE")?;
+        let has_next = value["hasNext"].as_bool().ok_or("PARSE")?;
+        let mut all_seen = !list.is_empty();
+        for val in list {
+            let item: sub::Item = serde_json::from_value(val.clone()).map_err(|_| "PARSE")?;
+            if !item.valid() {
+                return Err("PARSE");
+            }
+            all_seen &= state.seen.contains(&item.id);
+            state.progress.items.push(item);
+        }
+        complete = !has_next
+            || value["windowed"] == true
+                && ((!state.baseline && page == 2) || state.baseline && all_seen);
+        if complete {
+            break;
+        }
+        let next = value["cursor"]
+            .as_str()
+            .filter(|s| !s.is_empty() && s.encode_utf16().count() <= 4096)
+            .ok_or("PARSE")?;
+        if !cursors.insert(next.to_owned()) {
+            return Err("PARSE");
+        }
+        state.progress.cursor = Some(next.into());
+        if page < 2 {
+            std::thread::sleep(Duration::from_millis(300))
+        }
+    }
+    verify_context()?;
+    let mut db = store.lock().map_err(|_| "CONFIG")?;
+    sub::commit(
+        &mut db,
+        t,
+        lease,
+        state,
+        complete,
+        now_ms().map_err(|_| "CONFIG")?,
+        hours,
+    )
+    .map_err(|e| match e {
+        park_storage::backup::Error::Invalid => "PARSE",
+        _ => "CONFIG",
+    })
 }
 #[uniffi::export]
 impl SourceService {
@@ -264,17 +278,26 @@ impl SourceService {
         } else {
             let budget = plugins::budget(&request);
             let manifest = self.catalog.manifest(&source, budget.clone())?;
-            if manifest["capabilities"]["subscriptionUpdates"] != true
-                || !manifest["updateSubscriptions"]["dimensions"].as_array()
-                    .is_some_and(|rows| rows.iter().any(|row| row["key"] == dimension)) {
+            if manifest["capabilities"]["subscriptionUpdates"] != true {
                 return Err(SourceFailure::Unsupported);
             }
-            let (_, result) = self.catalog.invoke(&source, "updateSubscriptions.normalize",
-                &[json!(dimension), json!(input)], budget)?;
-            let data = downloads::checked(result)?;
-            let target = data["id"].as_str().map(str::trim).filter(|v| !v.is_empty())
-                .ok_or(SourceFailure::Configuration)?;
-            (target.to_owned(), data["label"].as_str().filter(|v| !v.is_empty()).unwrap_or(target).to_owned())
+            if dimension == "filter" && input.starts_with('{') {
+                let tag: serde_json::Value = serde_json::from_str(input).map_err(|_| SourceFailure::Configuration)?;
+                let keyword = tag["keyword"].as_str().ok_or(SourceFailure::Configuration)?;
+                if !tag["filters"].is_object() { return Err(SourceFailure::Configuration); }
+                (input.to_owned(), keyword.to_owned())
+            } else {
+                if !manifest["updateSubscriptions"]["dimensions"].as_array()
+                    .is_some_and(|rows| rows.iter().any(|row| row["key"] == dimension)) {
+                    return Err(SourceFailure::Unsupported);
+                }
+                let (_, result) = self.catalog.invoke(&source, "updateSubscriptions.normalize",
+                    &[json!(dimension), json!(input)], budget)?;
+                let data = downloads::checked(result)?;
+                let target = data["id"].as_str().map(str::trim).filter(|v| !v.is_empty())
+                    .ok_or(SourceFailure::Configuration)?;
+                (target.to_owned(), data["label"].as_str().filter(|v| !v.is_empty()).unwrap_or(target).to_owned())
+            }
         };
         let mut db = store.lock().map_err(storage)?;
         request.check().map_err(|_| SourceFailure::Cancelled)?;
@@ -361,8 +384,97 @@ impl SourceService {
         Ok(json!({"checked":checked,"failed":failed}).to_string())
     }
 }
+/// 桌面宿主在现有站点会话中执行插件；租约、游标、去重与写回由核心统一管理。
+#[uniffi::export(callback_interface)]
+pub trait SubscriptionReader: Send + Sync {
+    fn context(&self) -> String;
+    fn page(&self, dimension: String, target: String, cursor: Option<String>) -> String;
+}
+
 #[uniffi::export]
 impl ProgressStore {
+    pub fn save_host_subscription(&self, source: String, dimension: String, target: String,
+                                  label: String) -> Result<String> {
+        let mut db = self.lock().map_err(storage)?;
+        sub::migrate(&mut db, &self.root).map_err(storage)?;
+        sub::save_target(&mut db, None, &source, &dimension, &target, &label, now_ms()?).map_err(storage)?;
+        db.query_row("SELECT identity FROM subscriptions WHERE source=? AND dimension=? AND target=?",
+                     rusqlite::params![source,dimension,target], |row| row.get(0)).map_err(storage)
+    }
+
+    pub fn check_host_subscription(&self, id: String, hours: i64, force: bool,
+                                   reader: Box<dyn SubscriptionReader>, request: Arc<Request>) -> Result<bool> {
+        if !(0..=24).contains(&hours) { return Err(SourceFailure::Configuration); }
+        if hours == 0 && !force { return Ok(true); }
+        let (target, lease) = {
+            let db = self.lock().map_err(storage)?;
+            let Some(lease) = sub::acquire(&db, &id, now_ms()?, force).map_err(storage)? else { return Ok(true) };
+            let target = db.query_row("SELECT source,dimension,target FROM subscriptions WHERE identity=?",
+                [&id], |row| Ok(sub::Target { id:id.clone(), source:row.get(0)?, dimension:row.get(1)?, target:row.get(2)? })).map_err(storage)?;
+            (target, lease)
+        };
+        let hash = reader.context();
+        let current = || {
+            if request.cancelled.is_cancelled() { return Err("CANCELLED"); }
+            if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) { return Err("CONFIG"); }
+            if reader.context() != hash { return Err("CANCELLED"); }
+            Ok(())
+        };
+        let result = current().and_then(|()| scan_subscription(self, &target, &lease,
+            if hours == 0 { 6 } else { hours }, &hash, |cursor| {
+                current()?;
+                let raw = reader.page(target.dimension.clone(), target.target.clone(), cursor.map(String::from));
+                if raw.len() > 8 * 1024 * 1024 { return Err("PARSE"); }
+                serde_json::from_str(&raw).map_err(|_| "PARSE")
+            }, current));
+        match result {
+            Ok(committed) => Ok(committed),
+            Err(code) => {
+                let db = self.lock().map_err(storage)?;
+                sub::fail(&db, &id, &lease, now_ms()?, code).map_err(storage)?;
+                if code == "CANCELLED" { Err(SourceFailure::Cancelled) } else { Ok(false) }
+            }
+        }
+    }
+
+    pub fn subscription_updates(&self) -> Result<String> {
+        let mut db = self.lock().map_err(storage)?;
+        sub::migrate(&mut db, &self.root).map_err(storage)?;
+        Ok(sub::view(&db).map_err(storage)?.to_string())
+    }
+
+    pub fn due_host_subscriptions(&self) -> Result<String> {
+        let mut db = self.lock().map_err(storage)?;
+        sub::migrate(&mut db, &self.root).map_err(storage)?;
+        let mut q = db.prepare("SELECT s.identity,s.source FROM subscriptions s
+            JOIN subscription_checks c USING(identity)
+            WHERE s.enabled=1 AND c.next_due<=?1 AND c.lease_until<=?1
+            ORDER BY s.source,s.created_at,s.identity").map_err(storage)?;
+        let targets = q.query_map([now_ms()?], |r| Ok(json!({
+            "id":r.get::<_,String>(0)?, "source":r.get::<_,String>(1)?
+        }))).map_err(storage)?.collect::<rusqlite::Result<Vec<_>>>().map_err(storage)?;
+        Ok(json!(targets).to_string())
+    }
+    pub fn set_subscription_option(&self, id: String, check: Option<bool>, notify: Option<bool>) -> Result<()> {
+        let mut db = self.lock().map_err(storage)?;
+        sub::set_target_option(&mut db, &id, check, notify).map_err(storage)
+    }
+
+    pub fn remove_subscription(&self, id: String) -> Result<()> {
+        self.lock().map_err(storage)?.execute("DELETE FROM subscriptions WHERE identity=?", [id]).map_err(storage)?;
+        Ok(())
+    }
+
+    pub fn read_subscription_event(&self, key: String) -> Result<()> {
+        self.lock()
+            .map_err(storage)?
+            .execute(
+                "UPDATE subscription_events SET unread=0 WHERE event_key=?",
+                [key],
+            )
+            .map_err(storage)?;
+        Ok(())
+    }
     pub fn subscription_event_page(&self, after_time: Option<i64>, after_key: String, limit: u32) -> Result<String> {
         let mut db = self.lock().map_err(storage)?;
         sub::migrate(&mut db, &self.root).map_err(storage)?;
@@ -387,31 +499,6 @@ impl ProgressStore {
         ).optional().map_err(storage)
     }
 
-    pub fn subscription_updates(&self) -> Result<String> {
-        let mut db = self.lock().map_err(storage)?;
-        sub::migrate(&mut db, &self.root).map_err(storage)?;
-        Ok(sub::view(&db).map_err(storage)?.to_string())
-    }
-    pub fn set_subscription_option(&self, id: String, check: Option<bool>, notify: Option<bool>) -> Result<()> {
-        let mut db = self.lock().map_err(storage)?;
-        sub::set_target_option(&mut db, &id, check, notify).map_err(storage)
-    }
-
-    pub fn remove_subscription(&self, id: String) -> Result<()> {
-        self.lock().map_err(storage)?.execute("DELETE FROM subscriptions WHERE identity=?", [id]).map_err(storage)?;
-        Ok(())
-    }
-
-    pub fn read_subscription_event(&self, key: String) -> Result<()> {
-        self.lock()
-            .map_err(storage)?
-            .execute(
-                "UPDATE subscription_events SET unread=0 WHERE event_key=?",
-                [key],
-            )
-            .map_err(storage)?;
-        Ok(())
-    }
     pub fn read_all_subscription_events(&self) -> Result<()> {
         self.lock().map_err(storage)?.execute(
             "UPDATE subscription_events SET unread=0 WHERE unread=1", []

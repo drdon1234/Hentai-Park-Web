@@ -96,8 +96,8 @@ import UniformTypeIdentifiers
   }
 
   func remove(_ work: LibraryWork, fallback: ProgressSession) async throws {
+    defer { revision += 1 }
     try await (session ?? fallback).removeDownload(work)
-    revision += 1
   }
 
   func recoverRecord(_ work: LibraryWork, remove: Bool, fallback: ProgressSession) async throws {
@@ -175,7 +175,7 @@ import UniformTypeIdentifiers
     }
   }
 
-  private func downloadChanged() { revision += 1 }
+  func downloadChanged() { revision += 1 }
   private func takeGameGrant(_ key: [String]) -> GameLinks? { gameGrants.removeValue(forKey: key) }
 
   #if os(iOS)
@@ -210,6 +210,24 @@ import UniformTypeIdentifiers
   func finish() {
     selected.removeAll()
     selecting = false
+  }
+}
+
+@MainActor struct DownloadRowSelectionMenu: ViewModifier {
+  let enabled: Bool
+  let work: LibraryWork
+  @ObservedObject var selection: DownloadSelection
+  let tr: (String) -> String
+
+  @ViewBuilder func body(content: Content) -> some View {
+    if enabled && !selection.selecting {
+      content.contextMenu {
+        Button(tr("批量选择")) {
+          selection.selected = [work.libraryID]
+          selection.selecting = true
+        }
+      }
+    } else { content }
   }
 }
 
@@ -387,6 +405,229 @@ import UniformTypeIdentifiers
   }
 }
 
+@MainActor struct DownloadRemovalMenu: View {
+  let work: LibraryWork
+  let session: ProgressSession
+  let tr: (String) -> String
+  @EnvironmentObject private var queue: DownloadQueue
+  @State private var editing = false
+  @State private var confirming = false
+  @State private var working = false
+  @State private var failed = false
+  @State private var choosingLine = false
+  @State private var videoInfo: DownloadRowInfo?
+  @State private var shareEpisode: OfflineChapter?
+
+  var body: some View {
+    if let pending = work.pendingDeletion {
+      Button(tr("重试")) { remove(pending) }.disabled(working)
+    } else {
+      Menu(tr("更多")) {
+        if work.media == "video", videoInfo.map({ info in info.chapters.contains { !info.completed.contains($0.id) } }) ?? true {
+          Button(tr("选择下载线路")) { choosingLine = true }
+        }
+        if let info = videoInfo, info.chapters.count == 1, let chapter = info.chapters.first, info.completed.contains(chapter.id) {
+          Button(tr("导出视频文件")) { shareEpisode = chapter }
+        }
+        if !work.chapters.isEmpty && work.media != "bundle" {
+          Button(tr("管理章节")) { editing = true }
+        }
+        Button(tr("删除下载"), role: .destructive) { confirming = true }
+      }
+      .accessibilityLabel(Text(tr("更多") + " · " + work.title))
+      .disabled(working)
+      .task(id: queue.revision) {
+        if work.media == "video" { videoInfo = try? await session.videoDownloadInfo(work) }
+      }
+      .sheet(isPresented: $choosingLine) {
+        DownloadLinePicker(session: session, work: work, tr: tr)
+      }
+      .sheet(isPresented: Binding(get: { shareEpisode != nil }, set: { if !$0 { shareEpisode = nil } })) {
+        if let chapter = shareEpisode {
+          VideoEpisodeShare(session: session, work: work, chapter: chapter, tr: tr)
+        }
+      }
+      .sheet(isPresented: $editing) {
+        ChapterRemovalSheet(work: work, session: session, tr: tr)
+      }
+      .alert(tr("删除下载？"), isPresented: $confirming) {
+        Button(tr("取消"), role: .cancel) {}
+        Button(tr("删除"), role: .destructive) { remove([]) }
+      } message: {
+        Text(work.title + "\n" + tr(work.source == "local" ? "将删除书库中的导入副本，原始归档会保留。" : "已下载的文件也会一并删除。"))
+      }
+    }
+    if failed { Text(tr("删除失败，请重试")) }
+  }
+
+  private func remove(_ chapters: [String]) {
+    guard !working else { return }
+    working = true
+    failed = false
+    Task {
+      defer { working = false }
+      do {
+        if chapters.isEmpty { try await queue.remove(work, fallback: session) }
+        else {
+          defer { queue.downloadChanged() }
+          try await session.removeDownloadedChapters(Set(chapters), from: work)
+        }
+      } catch { failed = true }
+    }
+  }
+}
+
+@MainActor private struct VideoEpisodeShare: View {
+  private final class ExportedEpisode {
+    let url: URL
+    init(_ url: URL) { self.url = url }
+    deinit { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+  }
+  let session: ProgressSession
+  let work: LibraryWork
+  let chapter: OfflineChapter
+  let tr: (String) -> String
+  @Environment(\.dismiss) private var dismiss
+  @State private var file: ExportedEpisode?
+  @State private var failed = false
+  @State private var attempt = 0
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text(work.title).font(.headline)
+      Text(chapter.title)
+      if let file {
+        FileShareButton(url: file.url, label: tr("分享")).fixedSize()
+      } else if failed {
+        Text(tr("无法读取文件，请重试")); Button(tr("重试")) { attempt += 1 }
+      } else { ProgressView() }
+      Button(tr("完成")) { dismiss() }.keyboardShortcut(.cancelAction)
+    }
+    .padding()
+    #if os(macOS)
+    .frame(minWidth: 300, minHeight: 160)
+    #endif
+    .task(id: attempt) {
+      failed = false
+      do {
+        guard file == nil else { return }
+        let url = try await session.exportedVideoEpisode(ChapterKey(source: work.source, workId: work.workId, chapterId: chapter.id))
+        let copy = ExportedEpisode(url)
+        try Task.checkCancellation()
+        file = copy
+      } catch { if !Task.isCancelled { failed = true } }
+    }
+  }
+}
+
+@MainActor private struct DownloadLinePicker: View {
+  let session: ProgressSession
+  let work: LibraryWork
+  let tr: (String) -> String
+  @Environment(\.dismiss) private var dismiss
+  @EnvironmentObject private var queue: DownloadQueue
+  @State private var episode: OfflineChapter?
+  @State private var grant: VideoLines?
+  @State private var failed = false
+  @State private var saving = false
+  @State private var attempt = 0
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text(tr("选择下载线路")).font(.headline)
+      Text(work.title)
+      if let episode { Text(episode.title) }
+      if let grant, let episode {
+        List(Array(grant.options().enumerated()), id: \.offset) { index, line in
+          Button(line.label) {
+            guard !saving else { return }
+            saving = true
+            Task {
+              defer { saving = false }
+              let key = ChapterKey(source: work.source, workId: work.workId, chapterId: episode.id)
+              do {
+                try await session.chooseVideoDownloadLine(key: key, lines: grant, index: UInt32(index))
+                queue.didEnqueue()
+                dismiss()
+              } catch { self.grant = nil; failed = true }
+            }
+          }
+        }
+      } else if failed {
+        Text(tr("加载失败"))
+        Button(tr("重试")) { attempt += 1 }
+      } else { ProgressView() }
+      Button(tr("取消")) { dismiss() }.keyboardShortcut(.cancelAction)
+    }
+    .padding().disabled(saving).interactiveDismissDisabled(saving)
+    #if os(macOS)
+    .frame(minWidth: 320, minHeight: 260)
+    #endif
+    .task(id: attempt) {
+      failed = false
+      do {
+        let info = try await session.videoDownloadInfo(work)
+        guard let next = info.chapters.first(where: { !info.completed.contains($0.id) }),
+              let library = InstalledSources.library else { throw SiteReadError.malformed }
+        let lines = try await session.videoChoices(library, key: ChapterKey(source: work.source, workId: work.workId, chapterId: next.id))
+        try Task.checkCancellation()
+        guard !lines.options().isEmpty else { throw SiteReadError.malformed }
+        episode = next
+        grant = lines
+      } catch { if !Task.isCancelled { failed = true } }
+    }
+  }
+}
+
+@MainActor private struct ChapterRemovalSheet: View {
+  let work: LibraryWork
+  let session: ProgressSession
+  let tr: (String) -> String
+  @EnvironmentObject private var queue: DownloadQueue
+  @Environment(\.dismiss) private var dismiss
+  @State private var selected = Set<String>()
+  @State private var confirming = false
+  @State private var working = false
+  @State private var failed = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text(tr("管理章节")).font(.headline)
+      Text(work.title)
+      List(work.chapters, id: \.id) { chapter in
+        Toggle(chapter.title, isOn: Binding(get: { selected.contains(chapter.id) }, set: { checked in
+          if checked { selected.insert(chapter.id) } else { selected.remove(chapter.id) }
+        }))
+      }
+      if failed { Text(tr("删除失败，请重试")) }
+      HStack {
+        Button(tr("取消")) { dismiss() }.keyboardShortcut(.cancelAction)
+        Spacer()
+        Button(tr("删除下载"), role: .destructive) { confirming = true }.disabled(selected.isEmpty)
+      }
+    }
+    #if os(macOS)
+    .frame(minWidth: 320, minHeight: 260)
+    #endif
+    .padding().disabled(working).interactiveDismissDisabled(working)
+    .alert(tr("删除下载？"), isPresented: $confirming) {
+      Button(tr("取消"), role: .cancel) {}
+      Button(tr("删除"), role: .destructive) {
+        guard !working, !selected.isEmpty else { return }
+        working = true
+        failed = false
+        Task {
+          defer { working = false; queue.downloadChanged() }
+          do { try await session.removeDownloadedChapters(selected, from: work); dismiss() }
+          catch { failed = true }
+        }
+      }
+    } message: {
+      Text(work.chapters.filter { selected.contains($0.id) }.map(\.title).joined(separator: "\n"))
+    }
+  }
+}
+
 @MainActor struct DownloadCategoryButton: View {
   let work: LibraryWork
   let session: ProgressSession
@@ -395,14 +636,17 @@ import UniformTypeIdentifiers
 
   var body: some View {
     Button(tr("分类")) { editing = true }.buttonStyle(.borderless)
+      .accessibilityHint(Text(work.title))
+      .accessibilityIdentifier("category:" + work.source + ":" + work.workId)
       .sheet(isPresented: $editing) { DownloadCategorySheet(work: work, session: session, tr: tr) }
   }
 }
 
-@MainActor private struct DownloadCategorySheet: View {
+@MainActor struct DownloadCategorySheet: View {
   let work: LibraryWork
   let session: ProgressSession
   let tr: (String) -> String
+  var favoriteOnly = false
   @Environment(\.dismiss) private var dismiss
   @State private var groups: [LibraryCategory]?
   @State private var selected = Set<Int64>()
@@ -440,7 +684,11 @@ import UniformTypeIdentifiers
           saving = true
           Task {
             defer { saving = false }
-            do { try await session.editDownloadCategories(work, added: added, removed: removed); dismiss() }
+            do {
+              if favoriteOnly { try await session.editStoredFavoriteCategories(work, added: added, removed: removed) }
+              else { try await session.editDownloadCategories(work, added: added, removed: removed) }
+              dismiss()
+            }
             catch { failed = true }
           }
         }.keyboardShortcut(.defaultAction).disabled(groups?.isEmpty != false)
@@ -668,6 +916,8 @@ import UniformTypeIdentifiers
               if (names[file.lastPathComponent]?.count ?? 0) > 1 { Text(verbatim: file.deletingLastPathComponent().path).font(.caption) }
               HStack {
                 FileShareButton(url: file, label: tr("分享")).fixedSize()
+                  .accessibilityHint(Text(verbatim: file.lastPathComponent))
+                  .accessibilityIdentifier("export-share:" + file.lastPathComponent)
                 if ["pdf", "cbz"].contains(file.pathExtension.lowercased()) {
                   Button(tr("删除"), role: .destructive) {
                     do {
@@ -678,6 +928,8 @@ import UniformTypeIdentifiers
                       removeFailed = false
                     } catch { removeFailed = true }
                   }
+                  .accessibilityHint(Text(file.lastPathComponent))
+                  .accessibilityIdentifier("export-delete:" + file.lastPathComponent)
                 }
               }
             }

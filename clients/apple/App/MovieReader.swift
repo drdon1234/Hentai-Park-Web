@@ -1,6 +1,9 @@
 import AVKit
 import ParkCore
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 @MainActor
 private final class MoviePlayback: ObservableObject, PlaybackOwner {
@@ -24,6 +27,8 @@ private final class MoviePlayback: ObservableObject, PlaybackOwner {
   private var key: ChapterKey?
   private var title = ""
   private var incognito = false
+  @Published private(set) var temporarySpeed = false
+  private var priorRate: Float = 1
   private var stamp: Int64 = 0
   private var lastPosition: Int64?
   private var duration: Int64?
@@ -180,7 +185,20 @@ private final class MoviePlayback: ObservableObject, PlaybackOwner {
     return save
   }
 
+  func holdSpeed(_ pressed: Bool) {
+    if pressed {
+      guard !temporarySpeed, let player, player.timeControlStatus == .playing, player.rate > 0 else { return }
+      priorRate = player.rate
+      player.rate = 2
+      temporarySpeed = true
+    } else if temporarySpeed {
+      temporarySpeed = false
+      if let player, player.rate == 2 { player.rate = priorRate }
+    }
+  }
+
   func interrupt() {
+    holdSpeed(false)
     webPaused = true
     player?.pause()
     PlaybackFocus.shared.release(self)
@@ -271,6 +289,7 @@ struct MovieReader: View {
   @State private var retry = 0
   @State private var line: MoviePlayback.Line?
   @State private var changing = false
+  @GestureState private var holdingMovie = false
   @State private var webReady = false
   @State private var webFailed = false
   @Environment(\.scenePhase) private var phase
@@ -325,6 +344,21 @@ struct MovieReader: View {
         }
       } else if let player = playback.player {
         VideoPlayer(player: player)
+          .accessibilityIdentifier("movie-player")
+          .simultaneousGesture(LongPressGesture(minimumDuration: 0.45)
+            .sequenced(before: DragGesture(minimumDistance: 0))
+            .updating($holdingMovie) { value, held, _ in
+              if case .second(true, _) = value { held = true }
+            })
+          .onChange(of: holdingMovie) { held in
+            playback.holdSpeed(held && phase == .active && !obscured)
+          }
+          .overlay(alignment: .topTrailing) {
+            if playback.temporarySpeed {
+              Text("2×").monospacedDigit().padding(6).background(.regularMaterial, in: Capsule())
+                .padding().allowsHitTesting(false)
+            }
+          }
           .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { event in
             guard !obscured, phase == .active, let item = event.object as? AVPlayerItem,
               item === player.currentItem, let index = tracks.firstIndex(where: { $0.id == key.chapterId }),
@@ -367,6 +401,9 @@ struct MovieReader: View {
       if !tracks.isEmpty && playOnOpen && !obscured && phase == .active { player?.play() }
     }
     .onChange(of: phase) { if $0 != .active { playback.interrupt() } }
+    #if os(macOS)
+      .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in playback.interrupt() }
+    #endif
     .onChange(of: obscured) { if $0 { playback.interrupt() } }
     .onChange(of: incognito) { playback.setIncognito($0) }
     #if os(iOS)

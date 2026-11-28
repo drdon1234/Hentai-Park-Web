@@ -30,7 +30,7 @@ import UIKit
   @State private var resolved: ResolvedGameResource?
   @State private var failure: String?
   @State private var busy = false
-  @State private var retry = 0
+  @State private var resolving: Task<Void, Never>?
   @State private var copied: String?
   @State private var openFailed = false
 
@@ -39,13 +39,37 @@ import UIKit
     let channel: SiteGameResource.Channel
     static func == (a: Self, b: Self) -> Bool { a.resource == b.resource && a.channel.id == b.channel.id }
   }
-  private func select(_ value: Choice) {
+  private func choose(_ choice: Choice) {
+    guard !busy, let list else { return }
+    guard choice.channel.requiresReply else { resolve(choice, list: list); return }
+    busy = true
+    resolving = Task {
+      let remembered = (try? await session.remembersGameReply(source: work.source)) == true
+      guard !Task.isCancelled else { return }
+      busy = false
+      if remembered { resolve(choice, list: list) } else { consent = choice }
+    }
+  }
+
+  private func resolve(_ value: Choice, list: GameResourceList, remember: Bool = false) {
+    guard !busy else { return }
     copied = nil
     openFailed = false
     resolved = nil
     failure = nil
     current = value
-    retry += 1
+    busy = true
+    resolving = Task {
+      defer { if !Task.isCancelled { busy = false } }
+      do {
+        if remember { try await session.rememberGameReply(source: work.source) }
+        try Task.checkCancellation()
+        let result = try await session.resolveGameChannel(list, resource: value.resource, channel: value.channel,
+          confirmedReply: value.channel.requiresReply ? value.channel.replyText : nil)
+        try Task.checkCancellation()
+        resolved = result
+      } catch { if !Task.isCancelled { failure = "加载失败" } }
+    }
   }
   var body: some View {
     VStack(alignment: .leading) {
@@ -64,7 +88,7 @@ import UIKit
               ForEach(resource.channels) { channel in
                 Button(channel.label.isEmpty ? channel.id : channel.label) {
                   let choice = Choice(resource:resource.id,channel:channel)
-                  if channel.requiresReply { consent = choice } else { select(choice) }
+                  choose(choice)
                 }.disabled(resource.expired || busy)
                 if current == Choice(resource:resource.id,channel:channel), let resolved {
                   fields(resolved, resource:resource, channel:channel.id)
@@ -79,7 +103,7 @@ import UIKit
           Text(tr(failure))
           Button(tr("重试")) {
             if let current {
-              if current.channel.requiresReply { consent = current } else { select(current) }
+              choose(current)
             } else { attempt += 1 }
           }
         }
@@ -93,21 +117,17 @@ import UIKit
         list = result
       } catch { if !Task.isCancelled { failure = "加载失败" } }
     }
-    .task(id: retry) {
-      guard let list, let current else { return }
-      busy = true
-      do {
-        let result = try await session.resolveGameChannel(list,resource:current.resource,channel:current.channel,
-          confirmedReply:current.channel.requiresReply ? current.channel.replyText : nil)
-        try Task.checkCancellation()
-        resolved = result
-      } catch { if !Task.isCancelled { failure = "加载失败" } }
-      if !Task.isCancelled { busy = false }
-    }
-    .alert(tr("回复解锁并获取链接"), isPresented: Binding(get:{consent != nil}, set:{if !$0 { consent=nil }}), presenting: consent) { choice in
+    .onDisappear { resolving?.cancel(); resolving = nil; busy = false }
+    .alert(tr("以你的账号发帖？"), isPresented: Binding(get:{consent != nil}, set:{if !$0 { consent=nil }}), presenting: consent) { choice in
       Button(tr("取消"), role:.cancel) {}
-      Button(tr("回复并获取链接")) { select(choice) }
-    } message: { choice in Text(choice.channel.replyText) }
+      Button(tr("回复并获取链接")) { if let list { resolve(choice, list: list) } }
+      Button(tr("回复并获取链接") + " · " + tr("这个站点不再询问")) {
+        if let list { resolve(choice, list: list, remember: true) }
+      }
+    } message: { choice in
+      Text(tr("{site}要求回复后才显示下载链接。继续会用你的账号在下面的帖子里公开回复。")
+        .replacingOccurrences(of: "{site}", with: work.source) + "\n" + work.title + "\n" + choice.channel.replyText)
+    }
   }
 
   @ViewBuilder private func fields(_ result: ResolvedGameResource, resource: SiteGameResource, channel: String) -> some View {
@@ -120,6 +140,8 @@ import UIKit
         VStack(alignment:.leading) {
           if data.direct != true, let url=URL(string:value) {
             Button(tr("打开链接")) { openURL(url) { accepted in openFailed = !accepted } }
+              .accessibilityHint(Text(tr("链接 {number}").replacingOccurrences(of:"{number}", with:String(index + 1))))
+              .accessibilityIdentifier("game-link-" + String(index + 1))
           }
           Text(value).textSelection(.enabled)
           copyButton("复制",value)

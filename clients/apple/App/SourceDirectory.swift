@@ -80,6 +80,9 @@ enum InstalledSources {
   @State private var sites: [InstalledSite]?
   @State private var chosen: InstalledSite?
   @State private var managing = false
+  @State private var options: InstalledSite?
+  @State private var searchOnly = false
+  @State private var hidden = Set<String>()
   @State private var failed = false
   @State private var retry = 0
 
@@ -92,8 +95,8 @@ enum InstalledSources {
     } else if let chosen, let library = InstalledSources.library {
       SourceResults(
         session: session, library: library, site: chosen, locale: locale, incognito: incognito,
-        tr: tr
-      ) { self.chosen = nil }.id(chosen.id)
+        tr: tr, startInSearch: searchOnly
+      ) { self.chosen = nil; searchOnly = false }.id(chosen.id)
     } else {
       VStack(alignment: .leading) {
         HStack {
@@ -108,12 +111,21 @@ enum InstalledSources {
           if sites.isEmpty { Text(tr("暂无内容")).padding() }
           List(displayOrder.ordered(sites)) { site in
             Button {
-              chosen = site
+              searchOnly = false; chosen = site
             } label: {
               VStack(alignment: .leading) {
                 Text(site.name ?? site.key)
                 if site.unavailable == true { Text(tr("站点加载失败，请重试")).font(.caption) }
               }
+            }.contextMenu {
+              Button(tr("站点设置")) { options = site }
+              if site.search == true { Button(tr("搜索")) { searchOnly = true; chosen = site } }
+              Toggle(tr("显示该站点的作品并自动加载"), isOn: Binding(get: { !hidden.contains(site.key) }, set: { value in
+                Task {
+                  do { hidden = Set(try await session.setHomeSite(site.key, visible: value)) }
+                  catch { failed = true }
+                }
+              }))
             }
           }
         } else {
@@ -124,7 +136,13 @@ enum InstalledSources {
         do {
           guard let library = InstalledSources.library else { throw CocoaError(.fileNoSuchFile) }
           sites = try await session.sites(library)
+          hidden = Set(try await session.privacySettings().homeHiddenSources ?? [])
         } catch { if !Task.isCancelled { failed = true } }
+      }.sheet(item: $options) { site in
+        if let library = InstalledSources.library {
+          SiteSettingsPage(session: session, library: library, site: site, locale: locale, tr: tr,
+                           changed: { retry += 1 }, signedIn: { options = nil })
+        }
       }
     }
   }
@@ -155,6 +173,7 @@ enum InstalledSources {
         HStack { Button(tr("返回"), action: back); Text(tr("搜索作品资料")).font(.headline) }
         HStack {
           TextField(tr(domain == "jav" ? "搜索番号、作品名或演员" : "搜索作品名、标签或作者"), text: $input).onSubmit(submit)
+            .accessibilityIdentifier("reference-keyword")
           Button(tr("搜索"), action: submit)
         }
         List(sites) { site in Button(site.name ?? site.key) { source = site } }
@@ -242,10 +261,19 @@ enum InstalledSources {
           }
           if !row.enabled { Text(tr("未启用")).font(.caption) }
           Spacer()
+          Toggle(tr("启用"), isOn: Binding(get: { row.enabled }, set: { enabled in
+            Task { await update {
+              try await session.setSiteEnabled(library, key: row.id, enabled: enabled)
+              displayOrder.clear()
+              NotificationCenter.default.post(name: .parkSiteOrderChanged, object: nil)
+            } }
+          })).labelsHidden().accessibilityLabel(tr("启用") + " " + row.name)
+            .accessibilityIdentifier("site-enabled:" + row.id)
           Button { move(index, -1) } label: { Image(systemName: "arrow.up") }
             .accessibilityLabel(Text(tr("上移") + " " + row.name)).disabled(index == 0)
           Button { move(index, 1) } label: { Image(systemName: "arrow.down") }
             .accessibilityLabel(Text(tr("下移") + " " + row.name)).disabled(index + 1 == rows.count)
+            .accessibilityIdentifier("site-down:" + row.id)
         }.buttonStyle(.borderless).disabled(measuring)
       }
     }.disabled(busy)
@@ -369,6 +397,7 @@ enum InstalledSources {
   var startingTag: DetailSearchTag? = nil
   var startingLink: URL? = nil
   var referenceDomain: String? = nil
+  var startInSearch = false
   let close: () -> Void
   @State private var filterSearch = false
   @State private var input = ""
@@ -390,6 +419,8 @@ enum InstalledSources {
   @State private var showFilters = false
   @State private var settingsChanged = false
   @State private var showLogin = false
+  @State private var albumScope: Data?
+  @StateObject private var translationPage = TranslationPage()
   @State private var problem: String?
   @State private var attempt = 0
   @State private var delivered: Int?
@@ -430,11 +461,16 @@ enum InstalledSources {
           HStack {
             Button(tr("返回"), action: close)
             Text(site.name ?? site.key).font(.headline)
+            TranslationControls(page: translationPage, tr: tr)
             if catalog?.hasSettings == true { Button(tr("站点设置")) { showLogin = true } }
+            if site.album, catalog != nil, startingLink == nil, searching || feed != nil {
+              Button(tr("相册")) { openAlbum() }
+            }
           }.padding(.horizontal)
           if (site.search == true || referenceDomain != nil && site.metadataSearch) && startingLink == nil {
             HStack {
               TextField(tr("搜索"), text: $input).onSubmit(submit)
+                .accessibilityIdentifier("site-keyword")
               Button(tr("搜索"), action: submit)
             }.padding(.horizontal)
           }
@@ -479,7 +515,8 @@ enum InstalledSources {
           if let randomError { Text(tr(randomError)).font(.caption) }
           List {
             ForEach(works) { item in
-              if (referenceDomain != nil ? site.metadataDetail : site.detail) { Button(item.title) { selected = item } } else { Text(item.title) }
+              let title = RemoteText(original: item.title, dictionary: nil, session: session, library: library, locale: locale, page: translationPage)
+              if (referenceDomain != nil ? site.metadataDetail : site.detail) { Button { selected = item } label: { title } } else { title }
             }
             if let problem {
               Text(tr(problem))
@@ -512,7 +549,12 @@ enum InstalledSources {
           let options = try await session.browseOptions(library, site: site.key, locale: locale)
           try Task.checkCancellation()
           catalog = options
-          if let startingTag {
+          if startInSearch && startingTag == nil && attempt == 0 && keyword.isEmpty {
+            filterSearch = true
+            loading = false
+            delivered = attempt
+            return
+          } else if let startingTag {
             requestKeyword = startingTag.keyword
             requestFilterSearch = !startingTag.filters.isEmpty
             requestValues = SiteBrowseOptions.defaults(options.searchFilters).merging(startingTag.filters) { _, value in value }
@@ -570,6 +612,24 @@ enum InstalledSources {
       SiteSettingsPage(session: session, library: library, site: site, locale: locale, tr: tr,
                        changed: { settingsChanged = true }, signedIn: { showLogin = false })
     }
+    .sheet(isPresented: Binding(get: { albumScope != nil }, set: { if !$0 { albumScope = nil } })) {
+      if let albumScope {
+        SiteAlbumPage(session: session, library: library, site: site, scope: albumScope, locale: locale,
+                      incognito: incognito, tr: tr, close: { self.albumScope = nil })
+      }
+    }
+  }
+
+  private func openAlbum() {
+    let values = filters[scope] ?? SiteBrowseOptions.defaults(definitions)
+    do {
+      let options = try JSONSerialization.jsonObject(with: JSONEncoder().encode(values))
+      let input: [String:Any]
+      if searching { input = ["search":["keyword":keyword,"filters":options] as [String:Any]] }
+      else if let feed { input = ["feed":feed,"options":options] }
+      else { return }
+      albumScope = try JSONSerialization.data(withJSONObject: input)
+    } catch { problem = siteMessage(error) }
   }
 
   private func submit() {
@@ -726,11 +786,12 @@ private enum DetailDestination: Hashable, Identifiable {
   @State private var chapter: ChapterKey?
   @State private var previewPage: Int?
   @State private var previewsExpanded = false
-  @State private var previews: [SiteThumbnail] = []
-  @State private var previewBatch = 0
-  @State private var previewHasNext = false
+  @State private var previewPager = PreviewPager()
   @State private var previewAttempt = 0
   @State private var lastPreviewAttempt = 0
+  @StateObject private var translationPage = TranslationPage()
+  @Environment(\.autoTranslateContent) private var automaticTranslation
+  @Environment(\.privacyObscured) private var translationObscured
   @State private var previewBusy = false
   @State private var previewError: String?
   @State private var resumedChapter: String?
@@ -796,7 +857,8 @@ private enum DetailDestination: Hashable, Identifiable {
       } else {
         PageReader(
           incognito: incognito, tr: tr, session: session, key: chapter, work: work, showBack: true,
-          back: { self.chapter = nil; previewPage = nil }, library: library, initialPage: previewPage
+          back: { self.chapter = nil; previewPage = nil }, library: library, initialPage: previewPage,
+          changeChapter: { next in previewPage = nil; self.chapter = next }
         ).id(chapter)
       }
     } else {
@@ -831,29 +893,33 @@ private enum DetailDestination: Hashable, Identifiable {
     destination = .search(tag)
   }
 
-  private func tagRow(_ tag: DetailSearchTag, link: String? = nil) -> some View {
+  private func tagRow(_ tag: DetailSearchTag, link: String? = nil, isAuthor: Bool = false) -> some View {
     DetailTagRow(session: session, library: library, site: site, tag: tag, locale: locale,
-      localText: dictionary?.translation(name: tag.name, namespace: tag.namespace), tr: tr,
-      canOpen: link != nil || site.search == true) {
+      localText: dictionary?.translation(name: tag.name, namespace: tag.namespace), tr: tr, translationPage: translationPage,
+      isAuthor: isAuthor, canOpen: link != nil || site.search == true) {
         if let link { destination = .author(link) } else { searchDetail(tag) }
       }
   }
 
   private var details: some View {
     VStack(alignment: .leading) {
-      Button(tr("返回"), action: close).padding(.horizontal)
+      HStack {
+        Button(tr("返回"), action: close)
+        Spacer()
+        TranslationControls(page: translationPage, tr: tr)
+      }.padding(.horizontal)
       if let detail {
         ScrollView {
           VStack(alignment: .leading, spacing: 12) {
-            Text(detail.title).font(.title)
-            if let subtitle = detail.subtitle { Text(subtitle) }
+            remote(detail.title).font(.title)
+            if let subtitle = detail.subtitle { remote(subtitle) }
             if let cover {
               Image(decorative: cover, scale: 1).resizable().scaledToFit().frame(maxHeight: 360)
                 .blur(radius: blurCovers ? 18 : 0).clipped()
             } else if imageFailed {
               Button(tr("重试")) { imageAttempt += 1 }
             }
-            if let description = detail.description { Text(description) }
+            if let description = detail.description { remote(description) }
             if !detail.variants.isEmpty || detail.workCode?.isEmpty == false {
               Text(tr("其他版本")).font(.headline)
               ForEach(detail.variants) { variant in
@@ -875,11 +941,15 @@ private enum DetailDestination: Hashable, Identifiable {
               ForEach(Array(authors.enumerated()), id: \.offset) { _, name in
                 let tag = DetailSearchTag(name: name, keyword: detail.authorSearch?.keyword,
                   filters: detail.authorSearch?.filters ?? [:])
-                tagRow(tag, link: detail.authorSearch?.url)
+                tagRow(tag, link: detail.authorSearch?.url, isAuthor: true)
               }
             }
             if !detail.searchTags.isEmpty {
               DetailSection(title: tr("标签"), expanded: $tagsExpanded) {
+                if (translationPage.override ?? automaticTranslation) && !translationObscured {
+                  TagPackGuide(session: session, library: library, key: TagPackKey(source: site.key, locale: locale),
+                               name: site.name ?? site.key, tr: tr)
+                }
                 ForEach(Array(detail.searchTags.enumerated()), id: \.offset) { _, tag in
                   tagRow(tag)
                 }
@@ -957,9 +1027,9 @@ private enum DetailDestination: Hashable, Identifiable {
                                    canDownload: work.media == "comic" || work.media == "novel" || work.media == "video" && site.nativeVideo) { row in
                   chapter = ChapterKey(source: site.key, workId: work.workId, chapterId: row.id)
               }
-              if work.media == "comic", let first = work.chapters.first, !previews.isEmpty || previewHasNext {
+              if work.media == "comic", let first = work.chapters.first, !previewPager.items.isEmpty || previewPager.hasNext {
                 DetailSection(title: tr("预览"), expanded: $previewsExpanded) {
-                  let tiles = ForEach(Array(previews.enumerated()), id: \.offset) { ordinal, item in
+                  let tiles = ForEach(Array(previewPager.items.enumerated()), id: \.offset) { ordinal, item in
                     let page = item.index.flatMap { $0 >= 0 ? $0 : nil } ?? ordinal
                     Button {
                       let target = work.chapters.first { $0.id == resumedChapter } ?? first
@@ -972,6 +1042,11 @@ private enum DetailDestination: Hashable, Identifiable {
                       }
                     }.disabled(!progressReady)
                     .accessibilityLabel(tr("第 {value0} 页").replacingOccurrences(of: "{value0}", with: String(UInt(page) + 1)))
+                    .onAppear {
+                      if ordinal == previewPager.items.count - 1 && previewPager.automatic && previewPager.hasNext && !previewBusy && previewError == nil {
+                        previewAttempt += 1
+                      }
+                    }
                   }
                   #if os(macOS)
                   ScrollView(.horizontal) {
@@ -980,17 +1055,20 @@ private enum DetailDestination: Hashable, Identifiable {
                   #else
                   LazyVGrid(columns: [GridItem(.adaptive(minimum: 82, maximum: 140))]) { tiles }
                   #endif
-                  if previewHasNext {
+                  if previewPager.hasNext {
                     if let previewError { Text(tr(previewError)) }
+                    else if previewPager.nextRemotePage > 1 && !previewPager.automatic {
+                      Text(tr("本页没有新增预览，可继续加载")).font(.caption).foregroundColor(.secondary)
+                    }
                     Button(tr(previewError == nil ? "加载更多预览" : "重试")) {
+                      previewPager.startManually()
                       previewAttempt += 1
                     }.disabled(previewBusy)
-                    .task(id: previewAttempt) {
-                      guard previewAttempt != lastPreviewAttempt else { return }
-                      lastPreviewAttempt = previewAttempt
-                      await morePreviews(detail)
-                    }
                   }
+                }.task(id: previewAttempt) {
+                  guard previewAttempt != lastPreviewAttempt && previewsExpanded else { return }
+                  lastPreviewAttempt = previewAttempt
+                  await morePreviews()
                 }
               }
             }
@@ -1054,6 +1132,9 @@ private enum DetailDestination: Hashable, Identifiable {
       case .editions(let code):
         AnyView(AggregateSearchPage(session: session, locale: locale, incognito: incognito, tr: tr,
           back: { destination = nil }, initialKeyword: code, category: site.category))
+        #if os(macOS)
+        .frame(minWidth: 420, idealWidth: 560, minHeight: 320, idealHeight: 440)
+        #endif
       }
     }.sheet(item: $relatedWork) { selected in
       AnyView(SiteDetails(session: session, library: library, site: site, workId: selected.id, preview: selected,
@@ -1077,9 +1158,8 @@ private enum DetailDestination: Hashable, Identifiable {
           try await session.readSubscriptionEvent(openedEvent)
         }
         work = opened
-        previews = Array((found.thumbnails ?? []).prefix(20))
-        previewHasNext = (found.thumbnails?.count ?? 0) > previews.count ||
-          (site.thumbnails && (found.thumbnailsTotal.map { $0 > previews.count } ?? true))
+        previewPager = PreviewPager(local: found.thumbnails ?? [], remote: site.thumbnails, total: found.thumbnailsTotal)
+        previewError = nil
         detail = found
         if let startChapter, work?.chapters.contains(where: { $0.id == startChapter }) == true {
           chapter = ChapterKey(source: site.key, workId: workId, chapterId: startChapter)
@@ -1093,30 +1173,24 @@ private enum DetailDestination: Hashable, Identifiable {
     }
   }
 
-  private func morePreviews(_ detail: SiteWork) async {
+  private func remote(_ text: String) -> some View {
+    RemoteText(original: text, dictionary: nil, session: session, library: library, locale: locale, page: translationPage)
+  }
+
+  private func morePreviews() async {
     previewBusy = true
     defer { previewBusy = false }
     previewError = nil
-    let local = detail.thumbnails ?? []
-    if previews.count < local.count {
-      previews = Array(local.prefix(previews.count + 40))
-      previewHasNext = previews.count < local.count || (site.thumbnails && (detail.thumbnailsTotal.map { $0 > previews.count } ?? true))
-      return
-    }
+    if previewPager.appendLocal() { return }
     do {
       let batch = try await prompt.perform {
-        try await session.siteThumbnails(library, site: site.key, work: workId, page: previewBatch + 1, confirmation: $0)
+        try await session.siteThumbnails(library, site: site.key, work: workId, page: previewPager.nextRemotePage, confirmation: $0)
       }
       try Task.checkCancellation()
-      var indexed = Set(previews.compactMap(\.index))
-      var others = Set(previews.filter { $0.index == nil })
-      previews.append(contentsOf: batch.thumbnails.filter { item in
-        if let index = item.index { return indexed.insert(index).inserted }
-        return others.insert(item).inserted
-      })
-      previewBatch += 1
-      previewHasNext = batch.hasNext == true
-    } catch { if !Task.isCancelled { previewError = siteMessage(error) } }
+      previewPager.append(batch)
+    } catch {
+      if !Task.isCancelled { previewPager.stopAutomatic(); previewError = siteMessage(error) }
+    }
   }
 }
 
@@ -1128,9 +1202,13 @@ private enum DetailDestination: Hashable, Identifiable {
   let locale: String
   let localText: String?
   let tr: (String) -> String
+  @ObservedObject var translationPage: TranslationPage
+  let isAuthor: Bool
   let canOpen: Bool
   let open: () -> Void
   @State private var translating = false
+  @State private var checkingSubscription = false
+  @State private var checkFailed = false
   @State private var result: String?
   @State private var failed = false
   @State private var attempt = 0
@@ -1140,8 +1218,12 @@ private enum DetailDestination: Hashable, Identifiable {
   var body: some View {
     VStack(alignment: .leading) {
       HStack {
-        if canOpen { Button(localText ?? tag.name, action: open) }
-        else { Text(localText ?? tag.name) }
+        let label = Group {
+          if isAuthor { Text(tag.name) }
+          else { RemoteText(original: tag.name, dictionary: localText, session: session, library: library, locale: locale, page: translationPage) }
+        }
+        if canOpen { Button(action: open) { label } }
+        else { label }
         Menu { actions } label: {
           Image(systemName: "ellipsis.circle")
             .accessibilityLabel(tr("更多") + " · " + tag.name)
@@ -1149,6 +1231,10 @@ private enum DetailDestination: Hashable, Identifiable {
       }.contextMenu { actions }.disabled(saving)
       if saving { ProgressView() }
       if let status { Text(status).font(.caption) }
+      if checkFailed {
+        Text(tr("部分订阅检查失败，请查看订阅状态")).font(.caption)
+        Button(tr("重试")) { checkSubscription() }
+      }
     }.sheet(isPresented: $translating) {
       VStack(alignment: .leading, spacing: 12) {
         Text(tr("划词翻译")).font(.headline)
@@ -1185,7 +1271,7 @@ private enum DetailDestination: Hashable, Identifiable {
         save {
           try await session.subscribeToTag(tag, source: site.key, library: library)
           status = tr("已添加更新订阅")
-          _ = try? await session.checkSubscriptions(library, force: true)
+          checkSubscription()
         }
       }
     }
@@ -1201,6 +1287,17 @@ private enum DetailDestination: Hashable, Identifiable {
         try await session.blockTag(entry)
         status = tr("已屏蔽「{label}」，列表中将隐藏带有该标签的作品").replacingOccurrences(of: "{label}", with: entry)
       }
+    }
+  }
+
+  private func checkSubscription() {
+    guard !checkingSubscription else { return }
+    checkingSubscription = true
+    checkFailed = false
+    Task {
+      defer { checkingSubscription = false }
+      do { checkFailed = try await !session.checkSubscriptions(library, force: true) }
+      catch { if !Task.isCancelled { checkFailed = true } }
     }
   }
 

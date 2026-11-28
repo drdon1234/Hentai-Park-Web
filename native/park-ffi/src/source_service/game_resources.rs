@@ -1,6 +1,8 @@
 use super::*;
 use serde_json::{json, Value};
 use std::collections::HashSet;
+mod desktop;
+pub use desktop::{open_host_game_offers, HostGameChoice, HostGameOffers};
 
 fn field<'a>(value: &'a Value, name: &str, limit: usize) -> Result<&'a str> {
     match value.get(name) {

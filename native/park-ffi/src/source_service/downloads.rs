@@ -26,6 +26,18 @@ pub struct DownloadBook {
 
 #[uniffi::export]
 impl ProgressStore {
+    pub fn choose_video_download_line(&self, key: ChapterKey, lines: Arc<VideoLines>, index: u32)
+        -> std::result::Result<(), StorageError> {
+        if lines.live || lines.owner != key.source
+            || lines.episode.as_ref() != Some(&(key.work_id.clone(), key.chapter_id.clone())) {
+            return Err(StorageError::InvalidDownload);
+        }
+        let choice = park_media::download::selection(&lines.grant, index as usize, &key.chapter_id)
+            .map_err(|_| StorageError::InvalidDownload)?;
+        let mut db = self.lock()?;
+        Ok(queue::choose_video_line(&mut db, &key.source, &key.work_id, &key.chapter_id, choice)?)
+    }
+
     pub fn enqueue_download(
         &self, book: DownloadBook, chapters: Vec<crate::OfflineChapter>, directory: String,
         lines: Option<Arc<VideoLines>>, index: Option<u32>,

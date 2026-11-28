@@ -50,6 +50,11 @@ impl SourceService {
         })
     }
 
+    pub fn set_managed_account(&self, source: String, enabled: bool, request: Arc<Request>) -> Result<()> {
+        downloads::checked(self.catalog.set_managed_account(&source, enabled, plugins::budget(&request))?)?;
+        Ok(())
+    }
+
     /// 调用方显式提交后才执行一次。凭据只交给该源声明的表单，返回值只包含用户可见状态。
     pub fn sign_in(
         &self,

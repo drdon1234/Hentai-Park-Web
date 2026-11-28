@@ -166,6 +166,10 @@ impl SourceService {
     pub fn library_source_kinds(&self, keys: Vec<String>, request: Arc<Request>) -> Result<std::collections::HashMap<String, String>> {
         Ok(self.catalog.library_source_kinds(&keys, budget(&request))?)
     }
+    pub fn plugin_description(&self, key: String, request: Arc<Request>) -> Result<String> {
+        let manifest = self.catalog.management_manifest(&key, budget(&request))?;
+        Ok(serde_json::json!({"name":manifest["name"], "category":manifest["category"]}).to_string())
+    }
     pub fn clear_site_cookies(&self, key: String, browser: Box<dyn RecoveryBrowser>, request: Arc<Request>) -> Result<()> {
         Ok(self.catalog.clear_site_cookies(&key, &Browser(browser.as_ref()), budget(&request))?)
     }

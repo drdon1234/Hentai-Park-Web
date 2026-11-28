@@ -17,8 +17,9 @@ mod tavern_resource;
 pub use tavern_resource::{SourceTavernResource, TavernOriginal};
 pub use game::OnlineGame;
 mod game_resources;
-pub use game_resources::{GameFile, GameLinks, GameOffers, GameTransfer};
+pub use game_resources::{open_host_game_offers, GameFile, GameLinks, GameOffers, GameTransfer, HostGameChoice, HostGameOffers};
 mod downloads;
+mod album;
 pub use downloads::DownloadBook;
 mod comic;
 mod novel;
@@ -32,6 +33,7 @@ mod reverse;
 pub use reverse::{ReverseCandidates, ReverseQuery};
 mod updates;
 mod library_updates;
+pub use library_updates::HostFavoriteCheck;
 mod subscriptions;
 pub use subscriptions::{SubscriptionDimension, SubscriptionSite};
 mod voice;
@@ -61,6 +63,35 @@ pub enum SourceFailure {
     ConfirmationRequired,
 }
 type Result<T> = std::result::Result<T, SourceFailure>;
+
+#[uniffi::export(callback_interface)]
+pub trait SourceBrowser: Send + Sync {
+    /// 返回 JSON 编码的浏览器响应，错误通过 `{"error":"CODE"}` 返回。
+    fn request(&self, source: String, payload: String) -> String;
+}
+
+struct BrowserTransportBridge(Box<dyn SourceBrowser>);
+impl park_runtime::BrowserTransport for BrowserTransportBridge {
+    fn request(
+        &self,
+        source: &str,
+        request: serde_json::Value,
+        _call: &Invocation,
+    ) -> std::result::Result<serde_json::Value, park_runtime::Error> {
+        let raw = self.0.request(source.to_owned(), request.to_string());
+        let value: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|_| park_runtime::Error::Network)?;
+        if let Some(error) = value["error"].as_str() {
+            return Err(match error {
+                "CANCELLED" => park_runtime::Error::Cancelled,
+                "TIMEOUT" => park_runtime::Error::Timeout,
+                "BLOCKED" => park_runtime::Error::Blocked,
+                _ => park_runtime::Error::Network,
+            });
+        }
+        Ok(value)
+    }
+}
 impl From<park_media::Error> for SourceFailure {
     fn from(error: park_media::Error) -> Self {
         match error {
@@ -177,6 +208,35 @@ pub struct PlaybackSession {
     inner: PlaybackRoute,
     _runtime: Arc<tokio::runtime::Runtime>,
 }
+
+fn open_source_service(
+    support: String,
+    cache_directory: String,
+    polyfills: String,
+    proxy: String,
+    system_roots: Vec<Vec<u8>>,
+    browser: Option<Arc<dyn park_runtime::BrowserTransport>>,
+) -> Result<Arc<SourceService>> {
+    park_domain::install_crash_diagnostics();
+    let root = PathBuf::from(support).join("park");
+    let sessions = Arc::new(Sessions::new(&root));
+    let routes = RouteHost::open(cache_directory, sessions.clone(), proxy, system_roots)?;
+    let catalog = match browser {
+        Some(browser) => SourceCatalog::new_with_browser(
+            &root,
+            polyfills,
+            sessions,
+            routes.transport.clone(),
+            browser,
+        ),
+        None => SourceCatalog::new(&root, polyfills, sessions, routes.transport.clone()),
+    };
+    Ok(Arc::new(SourceService {
+        catalog: Arc::new(catalog),
+        routes,
+    }))
+}
+
 #[uniffi::export]
 impl SourceService {
     #[uniffi::constructor]
@@ -187,14 +247,25 @@ impl SourceService {
         proxy: String,
         system_roots: Vec<Vec<u8>>,
     ) -> Result<Arc<Self>> {
-        park_domain::install_crash_diagnostics();
-        let root = PathBuf::from(support).join("park");
-        let sessions = Arc::new(Sessions::new(&root));
-        let routes = RouteHost::open(cache_directory, sessions.clone(), proxy, system_roots)?;
-        Ok(Arc::new(Self {
-            catalog: Arc::new(SourceCatalog::new(&root, polyfills, sessions, routes.transport.clone())),
-            routes,
-        }))
+        open_source_service(support, cache_directory, polyfills, proxy, system_roots, None)
+    }
+    #[uniffi::constructor]
+    pub fn new_with_browser(
+        support: String,
+        cache_directory: String,
+        polyfills: String,
+        proxy: String,
+        system_roots: Vec<Vec<u8>>,
+        browser: Box<dyn SourceBrowser>,
+    ) -> Result<Arc<Self>> {
+        open_source_service(
+            support,
+            cache_directory,
+            polyfills,
+            proxy,
+            system_roots,
+            Some(Arc::new(BrowserTransportBridge(browser))),
+        )
     }
     pub fn video_lines(
         &self,

@@ -8,6 +8,7 @@ pub struct ReverseQuery {
     catalog: Arc<SourceCatalog>,
     source: String,
     candidates: ReverseCandidates,
+    browser: Option<Value>,
 }
 
 #[derive(Object)]
@@ -179,6 +180,63 @@ impl ReverseQuery {
             self.candidates.cached_rows()
         }
     }
+
+    /// 返回需要可见应用内浏览器上传的初始地址。浏览器反搜不会把图片交给
+    /// 原生 HTTP，上传和结果页始终在同一 WebView 会话中完成。
+    pub fn browser_url(&self) -> Option<String> {
+        self.browser
+            .as_ref()
+            .and_then(|v| v["url"].as_str().map(str::to_owned))
+    }
+
+    pub fn browser_upload_url(&self) -> Option<String> {
+        self.browser
+            .as_ref()
+            .and_then(|v| v["uploadUrl"].as_str().map(str::to_owned))
+    }
+
+    pub fn browser_file_field(&self) -> Option<String> {
+        self.browser
+            .as_ref()
+            .and_then(|v| v["fileField"].as_str().map(str::to_owned))
+    }
+
+    pub fn browser_result_path(&self) -> Option<String> {
+        self.browser
+            .as_ref()
+            .and_then(|v| v["resultPath"].as_str().map(str::to_owned))
+    }
+
+    pub fn browser_result_query(&self) -> Option<String> {
+        self.browser
+            .as_ref()
+            .and_then(|v| v["resultQuery"].as_str().map(str::to_owned))
+    }
+
+    /// 将同一浏览器会话读到的结果页交回插件解析，生成普通候选查询。
+    pub fn browser_result(
+        &self,
+        url: String,
+        html: String,
+        request: Arc<Request>,
+    ) -> Result<Arc<Self>> {
+        if html.len() > 4 * 1024 * 1024 || url.len() > 4096 {
+            return invalid();
+        }
+        let call = plugins::budget(&request);
+        let (_, raw) = self.catalog.invoke(
+            &self.source,
+            "reverseSearchResult",
+            &[json!({"url": url, "html": html})],
+            call,
+        )?;
+        Ok(Arc::new(Self {
+            catalog: self.catalog.clone(),
+            source: self.source.clone(),
+            candidates: ReverseCandidates::from_value(downloads::checked(raw)?)?,
+            browser: None,
+        }))
+    }
 }
 #[uniffi::export]
 impl SourceService {
@@ -200,10 +258,57 @@ impl SourceService {
         let (_, raw) = self
             .catalog
             .invoke(&source, "reverseSearch", &[input], call)?;
+        let checked = downloads::checked(raw)?;
+        if checked.get("browser").is_some() {
+            let browser = checked.get("browser").cloned().ok_or(SourceFailure::Unsupported)?;
+            let domains = manifest["domains"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>();
+            let valid_url = |value: &Value| {
+                let Some(raw) = value.as_str() else { return false };
+                let Ok(url) = Url::parse(raw) else { return false };
+                url.scheme() == "https"
+                    && url.port_or_known_default() == Some(443)
+                    && url.username().is_empty()
+                    && url.password().is_none()
+                    && url.fragment().is_none()
+                    && url.host_str().is_some_and(|host| {
+                        domains.iter().any(|domain| {
+                            let domain = domain.trim_start_matches("*.");
+                            host == domain || host.ends_with(&format!(".{domain}"))
+                        })
+                    })
+            };
+            let file = browser["fileField"].as_str().unwrap_or("");
+            let path = browser["resultPath"].as_str().unwrap_or("");
+            let query = browser["resultQuery"].as_str().unwrap_or("");
+            if !browser.is_object()
+                || !valid_url(&browser["url"])
+                || !valid_url(&browser["uploadUrl"])
+                || file.is_empty()
+                || file.len() > 128
+                || path.is_empty()
+                || path.len() > 256
+                || query.is_empty()
+                || query.len() > 128
+            {
+                return invalid();
+            }
+            return Ok(Arc::new(ReverseQuery {
+                catalog: self.catalog.clone(),
+                source,
+                candidates: ReverseCandidates { rows: Vec::new(), continuation: None },
+                browser: Some(browser),
+            }));
+        }
         Ok(Arc::new(ReverseQuery {
             catalog: self.catalog.clone(),
             source,
-            candidates: ReverseCandidates::from_value(downloads::checked(raw)?)?,
+            candidates: ReverseCandidates::from_value(checked)?,
+            browser: None,
         }))
     }
 }

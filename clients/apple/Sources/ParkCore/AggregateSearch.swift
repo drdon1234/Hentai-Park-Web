@@ -3,6 +3,7 @@ import Foundation
 public struct SearchScope: Sendable {
   public let sites: [InstalledSite]
   public let excluded: Set<String>
+  fileprivate let referenceDomains: [String: String]
 }
 
 extension ProgressSession {
@@ -14,15 +15,25 @@ extension ProgressSession {
       let homeMedia: String?
     }
     let settings = try await preferences(Scope.self)
-    let domains = Set(discoveryDomains(order: settings.domainOrder ?? [],
-                                       dimension: settings.homeDimension ?? "all", media: settings.homeMedia ?? "all"))
+    let domains = discoveryDomains(order: settings.domainOrder ?? [],
+                                   dimension: settings.homeDimension ?? "all", media: settings.homeMedia ?? "all")
+    let referenceCategories = category.map { [$0] } ?? domains
+    var referenceDomains = [String: String]()
     let available = try await installedSites(library).filter { site in
-      site.search == true && (metadataOnly ? site.metadata == true && site.rankingOnly != true : site.isBrowsableSite)
+      if metadataOnly {
+        guard site.search == true || site.metadataSearch,
+              let domain = referenceCategories.first(where: { site.offersReference(in: $0) }) else { return false }
+        referenceDomains[site.key] = domain
+        return true
+      }
+      return site.search == true && site.isBrowsableSite
         && (category.map { allowed in site.category == allowed } ?? domains.contains(site.category ?? ""))
     }
-    if preferred == "preferred", let first = available.first { return SearchScope(sites: [first], excluded: []) }
-    if let preferred, let site = available.first(where: { $0.key == preferred }) { return SearchScope(sites: [site], excluded: []) }
-    return SearchScope(sites: available, excluded: Set(settings.aggregateExcluded ?? []))
+    if let preferred {
+      let selected = preferred == "preferred" ? available.first : available.first { $0.key == preferred }
+      return SearchScope(sites: selected.map { [$0] } ?? [], excluded: [], referenceDomains: referenceDomains)
+    }
+    return SearchScope(sites: available, excluded: Set(settings.aggregateExcluded ?? []), referenceDomains: referenceDomains)
   }
 
   public func setSearchExcluded(_ keys: Set<String>) async throws {
@@ -49,6 +60,7 @@ public actor AggregateSearch {
   private let session: ProgressSession
   private let library: SourceLibrary
   private let keyword: String
+  private let referenceDomains: [String: String]
   private let order: [String]
   private var rows: [String: SiteSearchSection]
   private var pending: [String]
@@ -59,6 +71,7 @@ public actor AggregateSearch {
     self.session = session
     self.library = library
     self.keyword = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+    referenceDomains = scope.referenceDomains
     let included = self.keyword.isEmpty ? [] : scope.sites.filter { !scope.excluded.contains($0.key) }
     order = included.map(\.key)
     pending = order
@@ -103,7 +116,8 @@ public actor AggregateSearch {
   private func fetch(_ previous: SiteSearchSection) async {
     var row = previous
     do {
-      let next = try await session.sitePage(library, site: row.site, keyword: keyword, page: row.page + 1, cursor: row.cursor)
+      let next = try await session.sitePage(library, site: row.site, keyword: keyword, page: row.page + 1, cursor: row.cursor,
+                                            referenceDomain: referenceDomains[row.id])
       var ids = Set(row.items.map(\.id))
       row.items.append(contentsOf: next.items.filter { ids.insert($0.id).inserted })
       row.page += 1

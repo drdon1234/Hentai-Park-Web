@@ -33,12 +33,14 @@ pub enum BrowseMethod {
     Random,
     ResolveLink,
     SubscriptionPosts,
+    SubscriptionMedia,
 }
 impl BrowseMethod {
     fn protocol(&self) -> (&'static str, usize, usize) {
         match self {
-            Self::SubscriptionPosts => ("subscription.posts", 2, 2),
             Self::Feed => ("feed", 2, 2),
+            Self::SubscriptionPosts => ("subscription.posts", 2, 2),
+            Self::SubscriptionMedia => ("subscription.media", 2, 2),
             Self::Search => ("search", 1, 1),
             Self::Detail => ("detail", 1, 2),
             Self::Related => ("related", 2, 2),
@@ -161,19 +163,29 @@ impl SourceService {
             call.check()?;
             match self.catalog.manifest(&entry.key, call) {
                 Ok(manifest) => result.push(json!({
-                    "key":entry.key, "name":manifest["name"], "category":manifest["category"], "type":manifest["type"],
+                    "key":entry.key, "name":manifest["name"], "category":manifest["category"], "type":manifest["type"], "color":manifest["color"],
                     "feed":manifest["feeds"].as_array().is_some_and(|rows| !rows.is_empty()),
                     "entryFeed":manifest["feeds"].as_array().and_then(|feeds|
                         feeds.iter().find(|feed| feed["key"] == manifest["defaultFeed"]).or_else(|| feeds.first())),
+                    "description":manifest["description"],
+                    "rankFeed":manifest["feeds"].as_array().and_then(|feeds|
+                        ["rank","toplist","popular"].iter().find_map(|needle| feeds.iter()
+                            .filter_map(|feed| feed["key"].as_str())
+                            .find(|key| key.to_ascii_lowercase().contains(needle)))),
+                    "random":manifest["capabilities"]["random"],
+                    "resolveLink":manifest["capabilities"]["resolveLink"],
+                    "accountRequired":manifest["account"]["required"] == true || manifest["account"]["managedAccount"] == true,
+                    "accountStatus":manifest["capabilities"]["status"],
                     "reverseOnly":manifest["reverseSearchOnly"],
                     "search":manifest["capabilities"]["search"],
                     "detail":manifest["capabilities"]["detail"],
                     "comments":manifest["capabilities"]["comments"],
                     "related":manifest["capabilities"]["related"],
+                    "interaction":manifest["capabilities"]["interaction"],
                     "gameResources":manifest["category"]=="game" && manifest["capabilities"]["gameResources"]==true && manifest["capabilities"]["resolveGameResource"]==true,
                     "thumbnails":manifest["capabilities"]["thumbnails"],
-                    "random":manifest["capabilities"]["random"],
-                    "resolveLink":manifest["capabilities"]["resolveLink"],
+                    "subscription":manifest["capabilities"]["subscription"],
+                    "album":manifest["capabilities"]["album"]==true,
                     "subscriptionUpdates":manifest["capabilities"]["subscriptionUpdates"],
                     "nativeVideo":manifest["capabilities"]["videos"],
                     "metadataSearch":manifest["capabilities"]["metadataSearch"],

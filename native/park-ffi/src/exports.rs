@@ -42,6 +42,45 @@ impl From<park_media::Error> for StorageError {
 }
 #[uniffi::export]
 impl ProgressStore {
+    /// 将单集已完成的视频复制到系统分享暂存区。HLS 仅打包清单引用的本地文件。
+    pub fn export_video_episode(&self, key: ChapterKey, destination: String, request: Arc<Request>)
+        -> Result<String, StorageError> {
+        use std::io::{Read, Write};
+        use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
+        let episode = self.video_file(key)?;
+        let main = Path::new(&episode.path);
+        let origin = main.parent().ok_or(StorageError::InvalidDownload)?;
+        let name = main.file_name().ok_or(StorageError::InvalidDownload)?;
+        let dir = Path::new(&destination).canonicalize().map_err(|_| StorageError::IoFailure)?;
+        let mut staged = tempfile::NamedTempFile::new_in(&dir).map_err(|_| StorageError::IoFailure)?;
+        let copy = |path: &Path, output: &mut dyn Write| -> Result<(), StorageError> {
+            let mut input = std::fs::File::open(path).map_err(|_| StorageError::UnavailableDownload)?;
+            let mut buffer = [0; 65536];
+            loop {
+                request.check().map_err(|_| StorageError::Cancelled)?;
+                let n = input.read(&mut buffer).map_err(|_| StorageError::IoFailure)?;
+                if n == 0 { return Ok(()); }
+                output.write_all(&buffer[..n]).map_err(|_| StorageError::IoFailure)?;
+            }
+        };
+        let mut target = dir.join(name);
+        if main.extension().is_some_and(|ext| ext == "m3u8") {
+            let mut archive = ZipWriter::new(staged.as_file_mut());
+            let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored).large_file(true);
+            for path in std::iter::once(main).chain(episode.resources.iter().map(Path::new)) {
+                let entry = path.strip_prefix(origin).ok().and_then(Path::to_str).ok_or(StorageError::InvalidDownload)?;
+                archive.start_file(entry.replace(std::path::MAIN_SEPARATOR, "/"), options).map_err(|_| StorageError::IoFailure)?;
+                copy(path, &mut archive)?;
+            }
+            archive.finish().map_err(|_| StorageError::IoFailure)?;
+            target.set_extension("zip");
+        } else { copy(main, staged.as_file_mut())?; }
+        staged.as_file().sync_all().map_err(|_| StorageError::IoFailure)?;
+        request.check().map_err(|_| StorageError::Cancelled)?;
+        staged.persist_noclobber(&target).map_err(|_| StorageError::IoFailure)?;
+        target.into_os_string().into_string().map_err(|_| StorageError::InvalidDownload)
+    }
+
     /// Windows 每章拥有一条下载记录和一个独立的完成清单。
     pub fn export_windows_comic(
         &self,

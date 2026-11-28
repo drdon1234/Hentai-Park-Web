@@ -1,4 +1,6 @@
 /* xHamster 的页面数据同时覆盖桌面和移动端；播放器地址只做静态解码。 */
+const xhamsterVideoId = '(?:[A-Za-z0-9][A-Za-z0-9_%.-]*-[A-Za-z0-9]{1,32}|xh[A-Za-z0-9]{5,8}|[0-9]{6,10})';
+const xhamsterIdPattern = new RegExp('^' + xhamsterVideoId + '$');
 Park.register({
   i18n: {
     'zh-Hant': {'综合成人视频，支持推荐、搜索和多清晰度播放': '綜合成人影片，支援推薦、搜尋和多畫質播放'},
@@ -9,20 +11,20 @@ Park.register({
     ru: {'综合成人视频，支持推荐、搜索和多清晰度播放': 'Видео для взрослых с рекомендациями, поиском и выбором качества'},
     ar: {'综合成人视频，支持推荐、搜索和多清晰度播放': 'فيديوهات للبالغين مع توصيات وبحث وخيارات جودة متعددة'},
   },
-  key: 'xhamster', name: 'xHamster', version: '0.0.2', minAppVersion: '0.13.6',
+  key: 'xhamster', name: 'xHamster', version: '0.0.3', minAppVersion: '0.13.6',
   type: 'video', category: 'adult', language: 'en', color: '#F15B2A',
   homepage: 'https://xhamster.com', description: '综合成人视频，支持推荐、搜索和多清晰度播放',
   domains: ['xhamster.com'], network: {mode: 'auto', vpnHint: true},
   imageHeaders: {Referer: 'https://xhamster.com/'},
   media: {mode: 'native', scope: 'session', origin: 'https://xhamster.com'},
-  linkPatterns: ['\\b(?:[a-z0-9-]+\\.)*xhamster\\.com/videos/([A-Za-z0-9_%.-]+-[A-Za-z0-9]+)(?:/)?(?:[?#]|$)'],
-  idPattern: '^[A-Za-z0-9][A-Za-z0-9_%.-]*-[A-Za-z0-9]{1,32}$',
+  linkPatterns: ['\\b(?:[a-z0-9-]+\\.)*xhamster\\.com/videos/(' + xhamsterVideoId + ')(?:/)?(?:[?#]|$)'],
+  idPattern: xhamsterIdPattern.source,
   defaultFeed: 'recommended', feeds: [{key: 'recommended', label: '推荐'}, {key: 'latest', label: '最新'}],
   searchHint: '搜索作品名或标签', BASE: 'https://xhamster.com',
 
   validId(value) {
     const id = String(value || '');
-    if (id.length > 500 || !/^[A-Za-z0-9][A-Za-z0-9_%.-]*-[A-Za-z0-9]{1,32}$/.test(id)) {
+    if (id.length > 500 || !xhamsterIdPattern.test(id)) {
       throw Park.error('NOT_FOUND', '影片编号无效');
     }
     let decoded;

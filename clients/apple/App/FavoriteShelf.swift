@@ -241,7 +241,8 @@ private extension View {
 
 @MainActor final class ShelfOptions: ObservableObject {
     @Published var term = ""
-    @Published var category = ""
+    @Published var category: Int64?
+    @Published var grid = true
     @Published var display = ShelfPreferences()
     @Published var stats: [String: FavoriteCardInfo] = [:]
     @Published var categories: [LibraryCategory] = []
@@ -254,11 +255,12 @@ private extension View {
             let info = try await session.favoriteStats()
             let groups = try await session.shelfCategories()
             let prefs = try await session.shelfPreferences()
+            let layout = try await session.shelfGrid()
             try Task.checkCancellation()
             stats = info
             categories = groups
             display = prefs
-            if !groups.contains(where: { $0.name == category }) { category = "" }
+            grid = layout
             failed = false
         } catch { if !Task.isCancelled { failed = true } }
     }
@@ -266,6 +268,7 @@ private extension View {
     func rows(_ works: [LibraryWork]) -> [LibraryWork] {
         let sort = display.librarySort, ascending = display.librarySortAsc
         let sources = Set(display.libraryFilterSources)
+        let categoryName = categories.first { $0.id == category }?.name
         func info(_ work: LibraryWork) -> FavoriteCardInfo? { stats[work.source + ":" + work.workId] }
         func rank(_ work: LibraryWork) -> Int64 {
             switch sort {
@@ -276,7 +279,7 @@ private extension View {
         }
         return works.filter { work in
             work.favorite && (term.isEmpty || work.title.localizedCaseInsensitiveContains(term)) &&
-                (category.isEmpty || work.categoryNames.contains(category)) &&
+                (category == nil || categoryName.map(work.categoryNames.contains) == true) &&
                 (display.libraryFilterKind == "all" || work.media == display.libraryFilterKind) &&
                 (sources.isEmpty || sources.contains(work.source)) &&
                 (!display.libraryFilterUnread || (info(work)?.unread ?? 0) > 0) &&
@@ -311,8 +314,15 @@ private extension View {
         let columns = textOnly ? [GridItem(.flexible())] : count == 0
             ? [GridItem(.adaptive(minimum: 128))]
             : Array(repeating: GridItem(.flexible(minimum: 30), alignment: .topLeading), count: count)
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-            ForEach(works, id: \.libraryID) { work in
+        if options.grid {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 12) { entries }
+        } else {
+            entries
+        }
+    }
+
+    private var entries: some View {
+        ForEach(works, id: \.libraryID) { work in
                 let info = options.stats[work.source + ":" + work.workId]
                 let selected = options.selected.contains(work.libraryID)
                 let localOnly = work.source == "local" || work.media == "bundle"
@@ -326,14 +336,22 @@ private extension View {
                             expanded = expanded == work.libraryID ? nil : work.libraryID
                         } else { details(work) }
                     } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            if let cover = info?.cover, !cover.isEmpty {
-                                ShelfCover(session: session, source: work.source, address: cover)
-                            }
-                            if options.selecting {
-                                Label(work.title, systemImage: selected ? "checkmark.circle.fill" : "circle")
-                            } else { Text(work.title) }
-                        }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                        if options.grid {
+                            VStack(alignment: .leading, spacing: 4) {
+                                if let cover = info?.cover, !cover.isEmpty {
+                                    ShelfCover(session: session, source: work.source, address: cover)
+                                }
+                                title(work, selected: selected)
+                            }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                        } else {
+                            HStack {
+                                if let cover = info?.cover, !cover.isEmpty {
+                                    ShelfCover(session: session, source: work.source, address: cover)
+                                        .frame(width: 44, height: 56)
+                                }
+                                title(work, selected: selected)
+                            }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                        }
                     }.buttonStyle(.borderless).accessibilityLabel(Text(work.title))
                         .accessibilityAddTraits(selected ? [.isSelected] : [])
                         .disabled(!options.selecting && localOnly && !canOpenLocal)
@@ -355,8 +373,12 @@ private extension View {
                         }
                     }
                 }.accessibilityElement(children: .contain)
-            }
         }
+    }
+
+    @ViewBuilder private func title(_ work: LibraryWork, selected: Bool) -> some View {
+        if options.selecting { Label(work.title, systemImage: selected ? "checkmark.circle.fill" : "circle") }
+        else { Text(work.title) }
     }
 }
 
@@ -408,7 +430,8 @@ private extension View {
     @State private var panel: Panel?
     @State private var draft = ShelfPreferences()
     @State private var searchDraft = ""
-    @State private var categoryDraft = ""
+    @State private var categoryDraft: Int64?
+    @State private var searching = false
     @State private var removing = false
     @State private var working = false
     @State private var failed = false
@@ -431,6 +454,22 @@ private extension View {
                 action("标为已读") { apply(.markRead) }.disabled(targets.isEmpty)
                 action("取消收藏") { removing = true }.disabled(targets.isEmpty)
             } else {
+                if searching || !options.term.isEmpty {
+                    HStack {
+                        TextField(tr("搜索"), text: $options.term).textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier("shelf-search")
+                        Button(tr("取消")) { options.term = ""; searching = false }
+                    }
+                } else { action("搜索") { searching = true } }
+                action(options.grid ? "切换为列表" : "切换为网格") {
+                    let next = !options.grid
+                    working = true
+                    Task {
+                        defer { working = false }
+                        do { try await session.setShelfGrid(next); options.grid = next; failed = false }
+                        catch { failed = true }
+                    }
+                }
                 action("筛选与排序") {
                     draft = options.display; searchDraft = options.term; categoryDraft = options.category
                     failed = false; panel = .filters
@@ -473,9 +512,9 @@ private extension View {
             Form {
                 TextField(tr("搜索"), text: $searchDraft)
                 Picker(tr("分类"), selection: $categoryDraft) {
-                    Text(tr("全部分类")).tag("")
-                    ForEach(options.categories, id: \.id) { Text($0.name).tag($0.name) }
-                }
+                    Text(tr("全部分类")).tag(nil as Int64?)
+                    ForEach(options.categories, id: \.id) { Text($0.name).tag(Optional($0.id)) }
+                }.pickerStyle(.menu).accessibilityIdentifier("shelf-category")
                 Picker(tr("媒体类型"), selection: $draft.libraryFilterKind) {
                     ForEach(["all","comic","novel","video","voice","game","article"], id: \.self) { key in
                         Text(tr(["all":"全部","comic":"漫画","novel":"小说","video":"视频","voice":"音声","game":"游戏","article":"文章"][key] ?? key)).tag(key)

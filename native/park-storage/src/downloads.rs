@@ -149,6 +149,28 @@ fn task(db: &Connection, uid: &str, source: &str, work: &str) -> Result<(PathBuf
     Ok((dir.into(), value))
 }
 
+/// 只替换仍有该未完分集的现有任务。确认期间删除、完成或进入删除流程时保留原状。
+pub fn choose_video_line(db: &mut Connection, source: &str, work: &str, episode: &str, choice: Value) -> Result<()> {
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let uid = format!("{source}:{work}");
+    let (_, mut data) = task(&tx, &uid, source, work)?;
+    let chapters = data["chapters"].as_array().ok_or(Error::Invalid)?;
+    let completed = data["completed"].as_array().ok_or(Error::Invalid)?;
+    if data["media"] != "video" || !data["deletingChapters"].is_null()
+        || !matches!(data["status"].as_i64(), Some(0 | 1 | 2 | 4))
+        || !chapters.iter().any(|c| c["id"] == episode) || completed.iter().any(|c| c == episode)
+        || choice["episode"] != episode {
+        return Err(Error::Invalid);
+    }
+    data["videoQuality"] = choice["quality"].clone();
+    data["videoSelection"] = choice;
+    data["error"] = Value::Null;
+    if data["status"] != 1 { data["status"] = 0.into(); }
+    tx.execute("UPDATE download_tasks SET json=? WHERE uid=? AND source=?", params![data.to_string(), uid, source])?;
+    tx.commit()?;
+    Ok(())
+}
+
 fn remove_owned(path: &Path, directory: bool) -> Result<()> {
     let meta = match fs::symlink_metadata(path) {
         Ok(meta) => meta,

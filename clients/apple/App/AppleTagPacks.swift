@@ -1,6 +1,87 @@
 import ParkCore
 import SwiftUI
 
+@MainActor private final class TagGuideSession: ObservableObject {
+  static let shared = TagGuideSession()
+  @Published var available = Set<TagPackKey>()
+  @Published var deferred = Set<String>()
+  var showing: UUID?
+}
+
+@MainActor struct TagPackGuide: View {
+  let session: ProgressSession
+  let library: SourceLibrary
+  let key: TagPackKey
+  let name: String
+  let tr: (String) -> String
+  @ObservedObject private var guides = TagGuideSession.shared
+  @State private var owner = UUID()
+  @State private var offered = false
+  @State private var bundled = false
+  @State private var busy = false
+  private enum Action { case install, ignoreSite, ignoreAll }
+  @State private var failed: Action?
+  @State private var revision = 0
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      if offered {
+        VStack(alignment: .leading, spacing: 8) {
+          Text(tr("下载标签翻译词库")).font(.headline)
+          Text(name + " · " + (Locale(identifier:key.locale).localizedString(forIdentifier:key.locale) ?? key.locale))
+          Text(tr("仅下载本站当前语言的标签词库；可在“搜索与翻译”的“翻译包管理”中选择站点和语言，下载或删除词包。")).font(.caption)
+          Button(tr("立即下载")) { perform(.install) }
+          if let failed {
+            Text(tr(failed == .install ? "翻译包安装失败，请重试" : "操作失败，请重试"))
+            Button(tr("重试")) { perform(failed) }
+          }
+          Menu(tr("不再提醒")) {
+            Button(tr("本站不再提醒")) { perform(.ignoreSite) }
+            Button(tr("所有站点不再提醒")) { perform(.ignoreAll) }
+          }
+          Button(tr("下次提醒")) { guides.deferred.insert(key.source); finish() }
+        }.disabled(busy)
+      }
+    }.task(id: revision) {
+      guard !guides.deferred.contains(key.source), guides.showing == nil || guides.showing == owner else { return }
+      do {
+        let preferences = try await session.tagReminderSettings()
+        guard preferences.allows(key) else { finish(); return }
+        let inventory = try await session.tagPacks(library)
+        try Task.checkCancellation()
+        bundled = inventory.bundled.contains(key)
+        guard !inventory.installed.contains(key), bundled || guides.available.contains(key),
+              guides.showing == nil || guides.showing == owner else { finish(); return }
+        guides.showing = owner; offered = true
+      } catch { if !Task.isCancelled { finish() } }
+    }.onReceive(NotificationCenter.default.publisher(for: .tagRemindersChanged)) { _ in revision += 1 }
+     .onReceive(NotificationCenter.default.publisher(for: .tagPackChanged)) { _ in revision += 1 }
+     .onChange(of: guides.available) { _ in revision += 1 }
+     .onDisappear { finish() }
+  }
+
+  private func finish() {
+    if guides.showing == owner { guides.showing = nil }
+    offered = false; failed = nil
+  }
+  private func perform(_ action: Action) {
+    guard !busy else { return }
+    busy = true
+    Task {
+      defer { busy = false }
+      do {
+        switch action {
+        case .install:
+          let index = bundled ? nil : try await session.dictionaryIndex(library)
+          try await session.installTagPack(key, library: library, index: index)
+        case .ignoreSite: try await session.ignoreTagReminders(source: key.source)
+        case .ignoreAll: try await session.setTagReminders(false)
+        }
+        finish()
+      } catch { failed = action }
+    }
+  }
+}
+
 @MainActor struct AppleTagPacks: View {
   let session: ProgressSession
   let library: SourceLibrary
@@ -16,6 +97,7 @@ import SwiftUI
   @State private var removing = false
   @State private var operation: Task<Void,Never>?
   @State private var revision = 0
+  @State private var reminders = true
 
   private var remote: Set<TagPackKey> { Set(available.map { TagPackKey(source: $0.source,locale: $0.locale) }) }
   private var all: Set<TagPackKey> { (inventory?.bundled ?? []).union(inventory?.installed ?? []).union(remote) }
@@ -37,7 +119,9 @@ import SwiftUI
       do {
         try await action()
         let updated = try await session.tagPacks(library)
+        let prefs = try await session.tagReminderSettings()
         try Task.checkCancellation()
+        reminders = prefs.tagDownloadReminders != false
         inventory = updated; normalize(); revision += 1
       } catch { if !Task.isCancelled { message = tr("翻译包安装失败，请重试") } }
     }
@@ -45,6 +129,7 @@ import SwiftUI
   private func refresh() async throws -> DictionaryIndex {
     let index = try await session.dictionaryIndex(library)
     available = try JSONDecoder().decode([OfficialTagPack].self,from: Data(index.packages().utf8))
+    TagGuideSession.shared.available = remote
     return index
   }
   private func bulk(_ targetLocale: String) async throws {
@@ -72,13 +157,19 @@ import SwiftUI
     VStack(alignment: .leading) {
       HStack { Text(tr("翻译包管理")).font(.headline); Spacer(); Button(tr("返回")) { dismiss() } }
       List {
+        Toggle(tr("提醒下载标签词库"), isOn: Binding(get: { reminders }, set: { enabled in
+          run {
+            try await session.setTagReminders(enabled)
+            if enabled { TagGuideSession.shared.deferred.removeAll() }
+          }
+        }))
         if !sites.isEmpty {
           Picker(tr("站点"),selection:$selected) {
-            ForEach(sites,id:\.self) { site in Text(inventory?.names[site] ?? site).tag(site) }
-          }
+            ForEach(sites,id:\.self) { site in Text(inventory?.names[site] ?? site).tag(site).accessibilityIdentifier("pack-site-"+site) }
+          }.pickerStyle(.menu).accessibilityIdentifier("pack-site")
           Picker(tr("语言"),selection:$locale) {
-            ForEach(locales,id:\.self) { id in Text(language(id)).tag(id) }
-          }
+            ForEach(locales,id:\.self) { id in Text(language(id)).tag(id).accessibilityIdentifier("pack-language-"+id) }
+          }.pickerStyle(.menu).accessibilityIdentifier("pack-language")
           Text(tr("词包优先显示译文；未命中时按内容翻译开关处理，搜索与屏蔽仍使用原文")).font(.caption)
           if inventory?.bundled.contains(key) == true {
             let installed = inventory?.installed.contains(key) == true
@@ -100,7 +191,7 @@ import SwiftUI
           }
           Button(tr("下载全部站点的 {language} 词包").replacingOccurrences(of:"{language}",with:language(locale))) {
             let lang = locale; run { try await bulk(lang) }
-          }
+          }.accessibilityIdentifier("pack-all-"+locale)
         } else if inventory != nil { Text(tr("暂无可用词包，可使用内容翻译")) }
         Button(tr("检查官方可用词包")) { run { _ = try await refresh(); message = tr("已更新可用词包列表") } }
       }.disabled(operation != nil)

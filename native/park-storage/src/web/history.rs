@@ -38,7 +38,7 @@ pub enum Error {
 }
 
 impl HistoryWrite {
-    pub fn apply(mut self, ledger: &Ledger, cancelled: impl Fn() -> bool) -> Result<Value, Error> {
+    pub fn apply(self, ledger: &Ledger, cancelled: impl Fn() -> bool) -> Result<Value, Error> {
         if self
             .page
             .is_some_and(|p| p < 0 || self.page_count.is_some_and(|n| p >= n))
@@ -92,9 +92,9 @@ impl HistoryWrite {
         })?;
         let scope = json!([self.source, self.work_id, self.chapter_id]).to_string();
         let new_version = if let Some(id) = &self.chapter_id {
-            let (version,page,state,image,length):(i64,Option<i64>,String,bool,Option<i64>)=tx.query_row(
-                "SELECT version,page_progress,read_state,coalesce(node_type='image',0),CASE WHEN json_type(node_metadata_json,'$.textLength')='integer' THEN json_extract(node_metadata_json,'$.textLength') END FROM chapters WHERE source=? AND work_id=? AND chapter_id=?",
-                params![self.source,self.work_id,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional()?.ok_or(Error::Missing)?;
+            let (version,state,image,length):(i64,String,bool,Option<i64>)=tx.query_row(
+                "SELECT version,read_state,coalesce(node_type='image',0),CASE WHEN json_type(node_metadata_json,'$.textLength')='integer' THEN json_extract(node_metadata_json,'$.textLength') END FROM chapters WHERE source=? AND work_id=? AND chapter_id=?",
+                params![self.source,self.work_id,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?.ok_or(Error::Missing)?;
             if self.version.ok_or(Error::VersionRequired)? != version {
                 return Err(Error::Conflict(Some(version)));
             }
@@ -105,9 +105,6 @@ impl HistoryWrite {
                 return Err(Error::Invalid);
             }
             let comic = kind == "comic" || image;
-            if comic {
-                self.page = self.page.map(|p| p.max(page.unwrap_or(0)));
-            }
             let complete = self
                 .page
                 .zip(self.page_count)

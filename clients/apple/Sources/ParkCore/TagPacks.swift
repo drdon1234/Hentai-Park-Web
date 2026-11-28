@@ -2,6 +2,7 @@ import Foundation
 
 extension Notification.Name {
   public static let tagPackChanged = Notification.Name("ParkCore.tagPackChanged")
+  public static let tagRemindersChanged = Notification.Name("ParkCore.tagRemindersChanged")
 }
 
 public struct TagPackKey: Hashable, Decodable, Sendable {
@@ -23,6 +24,26 @@ public struct OfficialTagPack: Decodable, Sendable {
 }
 
 extension ProgressSession {
+  public struct TagReminderSettings: Decodable, Sendable {
+    public let tagDownloadReminders: Bool?
+    public let tagDownloadIgnoredSources: [String]?
+    public func allows(_ key: TagPackKey) -> Bool {
+      tagDownloadReminders != false && tagDownloadIgnoredSources?.contains(key.source) != true
+    }
+  }
+
+  public func tagReminderSettings() async throws -> TagReminderSettings { try await preferences(TagReminderSettings.self) }
+
+  public func setTagReminders(_ enabled: Bool) async throws {
+    try await run { store, _ in try store.savePreference(name: "tagDownloadReminders", json: String(enabled)) }
+    await MainActor.run { NotificationCenter.default.post(name: .tagRemindersChanged, object: nil) }
+  }
+
+  public func ignoreTagReminders(source: String) async throws {
+    try await run { store, _ in try store.ignoreDictionaryReminder(source: source) }
+    await MainActor.run { NotificationCenter.default.post(name: .tagRemindersChanged, object: nil) }
+  }
+
   public func tagPacks(_ library: SourceLibrary) async throws -> TagPackInventory {
     try await run { store, _ in
       let names = Dictionary(uniqueKeysWithValues: try library.bundledSites())

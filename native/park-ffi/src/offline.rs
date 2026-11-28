@@ -183,6 +183,14 @@ impl ProgressStore {
     pub fn stored_work(&self, source: String, work: String) -> Result<Option<String>, StorageError> {
         Ok(self.lock()?.query_row("SELECT json FROM works WHERE source=? AND id=?",params![source,work],|r|r.get(0)).optional()?)
     }
+    pub fn set_stored_favorite(&self, source: String, work: String, enabled: bool) -> Result<(), StorageError> {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| StorageError::IoFailure)?.as_millis().try_into().map_err(|_| StorageError::IoFailure)?;
+        let mut db = self.lock()?;
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        park_storage::library::set_existing_favorite(&tx, &source, &work, enabled, now)?;
+        Ok(tx.commit()?)
+    }
     pub fn is_favorite(&self, source: String, work: String) -> Result<bool, StorageError> {
         Ok(self.lock()?.query_row("SELECT favorite FROM works WHERE source=? AND id=?",params![source,work],|r|r.get(0)).optional()?.unwrap_or(false))
     }

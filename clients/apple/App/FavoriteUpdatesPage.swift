@@ -18,6 +18,16 @@ import SwiftUI
   @State private var entry: FavoriteUpdates.Entry?
   @State private var site: InstalledSite?
 
+  init(session: ProgressSession, locale: String, incognito: Bool, tr: @escaping (String) -> String,
+       back: @escaping () -> Void, category: Int64?) {
+    self.session = session
+    self.locale = locale
+    self.incognito = incognito
+    self.tr = tr
+    self.back = back
+    _category = State(initialValue: category)
+  }
+
   var body: some View {
     Group {
       if let entry, let site, let library = InstalledSources.library {

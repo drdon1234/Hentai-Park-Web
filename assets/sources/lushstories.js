@@ -31,11 +31,12 @@
     const out = [],
       seen = new Set();
     for (const a of d.querySelectorAll('a[href]')) {
-      const h = a.querySelector('h2,h3');
+      const row = a.closest('article');
+      const title = Park.html.text(a.querySelector('h2,h3') || (a.classList.contains('font-bold') ? a : null));
       if (
-        !h ||
-        !a.closest('article') ||
-        a.closest('article').parentElement?.classList.contains('relative')
+        !title ||
+        !row ||
+        row.parentElement?.classList.contains('relative')
       )
         continue;
       let u;
@@ -52,8 +53,7 @@
       )
         continue;
       seen.add(m[1]);
-      const row = a.closest('article'),
-        authorNode = row.querySelector('header a[href^="/profile/"]'),
+      const authorNode = row.querySelector('header a[href^="/profile/"]'),
         author = authorNode?.getAttribute('aria-label') || Park.html.text(authorNode),
         categoryNode = [...row.querySelectorAll('footer a[href]')].find(n =>
           n.getAttribute('href') === '/stories/' + m[1].split('/')[0]),
@@ -64,7 +64,7 @@
           .map(n => Park.html.text(n)).filter(Boolean);
       out.push({
         id: m[1],
-        title: Park.html.text(h),
+        title,
         subtitle: summary,
         authors: author ? [author] : [],
         category,
@@ -114,7 +114,7 @@
     },
     key: 'lushstories',
     name: 'Lush Stories',
-    version: '0.0.8', minAppVersion: '0.13.6',
+    version: '0.0.9', minAppVersion: '0.13.6',
     type: 'novel',
     category: 'novel',
     language: 'en',

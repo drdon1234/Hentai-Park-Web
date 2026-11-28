@@ -43,22 +43,65 @@ pub fn set_preferences(root: &Path, values: impl IntoIterator<Item = (String, Va
 }
 
 pub fn add_blocked_tag(root: &Path, tag: String) -> Result<Vec<String>> {
+    set_membership(root, "blockedTags", tag, true)
+}
+
+pub fn remember_game_reply(root: &Path, source: String) -> Result<()> {
+    if source.is_empty() { return Err(Error::Invalid); }
+    set_membership(root, "replyWithoutAsking", source, true)?;
+    Ok(())
+}
+
+pub fn ignore_dictionary_reminder(root: &Path, source: String) -> Result<()> {
+    if source.is_empty() { return Err(Error::Invalid); }
+    set_membership(root, "tagDownloadIgnoredSources", source, true)?;
+    Ok(())
+}
+
+pub fn set_home_membership(root: &Path, name: &str, entry: String, enabled: bool) -> Result<Vec<String>> {
+    if !matches!(name, "homeHiddenSources" | "homeExpandedDomains") || entry.is_empty() {
+        return Err(Error::Invalid);
+    }
+    set_membership(root, name, entry, enabled)
+}
+
+pub fn block_library_item(root: &Path, source: &str, work: &str, title: &str, author: Option<&str>) -> Result<()> {
+    if source.is_empty() || work.is_empty() { return Err(Error::Invalid); }
+    ready(root)?;
+    let mut current = object(read_json(&root.join("settings.json"))?)?;
+    let uid = format!("{source}:{work}");
+    let field = if author.is_some() { "blockedAuthors" } else { "blockedWorks" };
+    let rules = current.entry(field).or_insert_with(|| serde_json::json!({}));
+    if !park_domain::settings::valid(field, rules) { return Err(Error::Invalid); }
+    let entries = rules.as_object_mut().ok_or(Error::Invalid)?;
+    if let Some(name) = author {
+        let name = name.trim();
+        if name.is_empty() { return Err(Error::Invalid); }
+        let rule = entries.entry(format!("{source}:{}", name.to_lowercase()))
+            .or_insert_with(|| serde_json::json!({"name":name,"works":[]}));
+        let works = rule["works"].as_array_mut().ok_or(Error::Invalid)?;
+        if !works.iter().any(|value| value.as_str() == Some(&uid)) { works.push(uid.into()); }
+    } else {
+        entries.insert(uid,title.into());
+    }
+    store_json(root, "settings.json", &current.into())
+}
+
+fn set_membership(root: &Path, name: &str, entry: String, enabled: bool) -> Result<Vec<String>> {
     ready(root)?;
     let mut settings = object(read_json(&root.join("settings.json"))?)?;
-    let mut tags = match settings.get("blockedTags") {
+    let mut entries: Vec<String> = match settings.get(name) {
         None => Vec::new(),
-        Some(value) => serde_json::from_value::<Vec<String>>(value.clone())?,
+        Some(value) => serde_json::from_value(value.clone())?,
     };
-    if !tags.contains(&tag) {
-        tags.push(tag);
-        let value = serde_json::to_value(&tags)?;
-        if !park_domain::settings::valid("blockedTags", &value) {
-            return Err(Error::Invalid);
-        }
-        settings.insert("blockedTags".into(), value);
+    if entries.contains(&entry) != enabled {
+        if enabled { entries.push(entry); } else { entries.retain(|value| value != &entry); }
+        let value = serde_json::to_value(&entries)?;
+        if !park_domain::settings::valid(name, &value) { return Err(Error::Invalid); }
+        settings.insert(name.into(), value);
         store_json(root, "settings.json", &settings.into())?;
     }
-    Ok(tags)
+    Ok(entries)
 }
 
 pub(super) fn persist(

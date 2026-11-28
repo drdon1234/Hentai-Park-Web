@@ -149,7 +149,42 @@ impl ProgressStore {
             return Err(StorageError::InvalidBackup);
         }
         let _gate = park_storage::recovery::gate(&self.root, true)?;
-        backup::set_preferences(&self.root, [(name, value)])?;
+        if name == "tagDownloadReminders" && value == true {
+            backup::set_preferences(&self.root, [(name, value), ("tagDownloadIgnoredSources".into(), serde_json::json!([]))])?;
+        } else {
+            backup::set_preferences(&self.root, [(name, value)])?;
+        }
+        Ok(())
+    }
+
+    pub fn complete_onboarding(&self, categories: Vec<String>, secure_screen: bool, blur_covers: bool) -> Result<(), StorageError> {
+        let interests = serde_json::json!(categories);
+        if !park_domain::settings::valid("homeCategories", &interests) {
+            return Err(StorageError::InvalidBackup);
+        }
+        let _gate = park_storage::recovery::gate(&self.root, true)?;
+        backup::set_preferences(&self.root, [
+            ("homeCategories".into(), interests), ("secureScreen".into(), secure_screen.into()),
+            ("blurCovers".into(), blur_covers.into()), ("onboarded".into(), true.into()),
+        ])?;
+        Ok(())
+    }
+
+    pub fn save_reader_preferences(&self, json: String) -> Result<(), StorageError> {
+        let values: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&json).map_err(|_| StorageError::InvalidBackup)?;
+        if !values.iter().all(|(name, value)| {
+            matches!(name.as_str(), "readerDim" | "readerWarm" | "readerGrayscale" | "readerInvert" |
+                "readerBackground" | "readerShowPageNumber" | "keepScreenOn" |
+                "readerGap" | "readerAnimate" | "readerDual" | "readerCoverSingle" |
+                "readerSplitWide" | "readerCrop" | "tapToPage" | "readerTapLayout" |
+                "readerTapInvertH" | "readerTapInvertV" | "readerOrientation")
+                && park_domain::settings::valid(name, value)
+        }) {
+            return Err(StorageError::InvalidBackup);
+        }
+        let _gate = park_storage::recovery::gate(&self.root, true)?;
+        backup::set_preferences(&self.root, values)?;
         Ok(())
     }
 
@@ -169,6 +204,14 @@ impl ProgressStore {
         Ok(())
     }
 
+    pub fn save_library_sort(&self, sort: String, ascending: bool) -> Result<(), StorageError> {
+        let value = serde_json::Value::String(sort);
+        if !park_domain::settings::valid("librarySort",&value) { return Err(StorageError::InvalidBackup); }
+        let _gate = park_storage::recovery::gate(&self.root,true)?;
+        backup::set_preferences(&self.root,[("librarySort".into(),value),("librarySortAsc".into(),ascending.into())])?;
+        Ok(())
+    }
+
     pub fn save_discovery_scope(&self, dimension: String, media: String) -> Result<(), StorageError> {
         let values = [("homeDimension".to_owned(), dimension.into()), ("homeMedia".to_owned(), media.into())];
         if !values.iter().all(|(name, value)| park_domain::settings::valid(name, value)) {
@@ -177,6 +220,36 @@ impl ProgressStore {
         let _gate = park_storage::recovery::gate(&self.root, true)?;
         backup::set_preferences(&self.root, values)?;
         Ok(())
+    }
+
+    pub fn save_block_rules(&self, patch: String) -> Result<(), StorageError> {
+        let values: serde_json::Map<String,serde_json::Value> =
+            serde_json::from_str(&patch).map_err(|_|StorageError::InvalidBackup)?;
+        if !values.iter().all(|(k,v)| matches!(k.as_str(),"blockedTags"|"blockedTagAliases"|"blockPresets"|"blockedWorks"|"blockedAuthors")
+            && park_domain::settings::valid(k,v)) {return Err(StorageError::InvalidBackup);}
+        let _gate = park_storage::recovery::gate(&self.root, true)?;
+        backup::set_preferences(&self.root,values)?;
+        Ok(())
+    }
+
+    pub fn remember_game_reply(&self, source: String) -> Result<(), StorageError> {
+        let _gate = park_storage::recovery::gate(&self.root, true)?;
+        Ok(backup::remember_game_reply(&self.root, source)?)
+    }
+
+    pub fn set_home_membership(&self, name: String, entry: String, enabled: bool) -> Result<Vec<String>, StorageError> {
+        let _gate = park_storage::recovery::gate(&self.root, true)?;
+        Ok(backup::set_home_membership(&self.root, &name, entry, enabled)?)
+    }
+
+    pub fn ignore_dictionary_reminder(&self, source: String) -> Result<(), StorageError> {
+        let _gate = park_storage::recovery::gate(&self.root, true)?;
+        Ok(backup::ignore_dictionary_reminder(&self.root, source)?)
+    }
+
+    pub fn block_library_item(&self, source: String, work: String, title: String, author: Option<String>) -> Result<(), StorageError> {
+        let _gate = park_storage::recovery::gate(&self.root, true)?;
+        Ok(backup::block_library_item(&self.root, &source, &work, &title, author.as_deref())?)
     }
 
     pub fn add_blocked_tag(&self, tag: String) -> Result<Vec<String>, StorageError> {

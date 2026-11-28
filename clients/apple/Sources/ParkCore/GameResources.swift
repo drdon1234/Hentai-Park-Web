@@ -45,6 +45,15 @@ public struct GameDownloadRecord: Identifiable, Decodable, Sendable {
 }
 
 extension ProgressSession {
+    public func remembersGameReply(source: String) async throws -> Bool {
+        struct Preferences: Decodable, Sendable { let replyWithoutAsking: [String]? }
+        return try await preferences(Preferences.self).replyWithoutAsking?.contains(source) == true
+    }
+
+    public func rememberGameReply(source: String) async throws {
+        try await run { store, _ in try store.rememberGameReply(source: source) }
+    }
+
     public func gameResources(_ library: SourceLibrary, source: String, work: String) async throws -> GameResourceList {
         let root=directory
         return try await run { _, request in

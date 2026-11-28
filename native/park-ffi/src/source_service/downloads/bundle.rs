@@ -1,7 +1,6 @@
 use super::*;
 use park_media::{RemoteImages, ResolvedImage, Route};
 use sha2::{Digest, Sha256};
-use base64::{engine::general_purpose::STANDARD, Engine};
 use std::collections::{HashMap, HashSet};
 
 fn digest(s: &str) -> String {
@@ -524,16 +523,7 @@ impl ChapterJob<'_> {
                 "subscription.mediaChunk",
                 &[resource.clone(), json!(offset)],
             )?;
-            let encoded = field(&chunk, "base64")?;
-            if encoded.len() > 174764 {
-                return Err(SourceFailure::Unsupported);
-            }
-            let bytes = STANDARD
-                .decode(encoded)
-                .map_err(|_| SourceFailure::Unsupported)?;
-            if bytes.len() as u64 != (size - offset).min(131072) {
-                return Err(SourceFailure::Unsupported);
-            }
+            let bytes = super::super::album::media_chunk(&chunk, size-offset)?;
             self.write(|dir| {
                 let mut file = io(fs::OpenOptions::new()
                     .create(true)

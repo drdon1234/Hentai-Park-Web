@@ -149,8 +149,8 @@ import SwiftUI
             try Task.checkCancellation()
             interactions = next
             if case .number(let value) = next.first(where: { $0.type == "rating" })?.value { rating = NSDecimalNumber(decimal:value).doubleValue }
-        } catch SourceFailure.Unsupported { error = "本站未提供原站互动" }
-        catch { if !Task.isCancelled { error = "操作失败，请重试" } }
+        } catch SourceFailure.Unsupported { self.error = "本站未提供原站互动" }
+        catch { if !Task.isCancelled { self.error = "操作失败，请重试" } }
     }
 }
 

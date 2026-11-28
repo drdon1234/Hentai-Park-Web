@@ -202,7 +202,7 @@ jobs:
                                      "fa50f9d3dfb7a9dafbda5c01781e87b72b0e528cc9ea2537266b595ad8a7ab97" if os.environ["EXERCISE_SCOPE"] == "host-directory" else
                                      "c615d249a495dcb8bae86f840a876d91cdaadfd111ac7104e7c2c711160aec05" if os.environ["EXERCISE_SCOPE"] == "host-update-route" else
                                      "f4d33ef662d41f340f279e0602c342c924e281db963036efd0298c0f57cc10b9" if os.environ["EXERCISE_SCOPE"] == "host-update-management" else
-                                     "b8ba28a93c8934e10f4bad07525d4051ef4f013fe6bef8cb7cf013ab5cb9a8c5" if os.environ["EXERCISE_SCOPE"] == "host-queue-batch" else
+                                     "5eac5eb7537008ef546f7c1a14d1a73d4ef99e596d59c588b3e308b48d6a9201" if os.environ["EXERCISE_SCOPE"] == "host-queue-batch" else
                                      "6ab042fd5e8e64fd6f2d52d4916f5424b8601740fefa6e7297908ea9bab48886" if os.environ["EXERCISE_SCOPE"] == "host-reader-modes" else
                                      "7bc9df4b9cddc87290bea20978e9e8b1cf1c28a5267d8809e57728e19533f5ec" if os.environ["EXERCISE_SCOPE"] == "host-chapter-actions" else
                                      "dfe2f59775245bc057c8d9e86daea98899f2e0353596c58e6db557c8dc90d3aa" if os.environ["EXERCISE_SCOPE"] == "host-comment-link" else
@@ -267,11 +267,11 @@ jobs:
           if [[ "$SIMULATOR_RUNTIME" == 26.2 ]]; then
             export DEVELOPER_DIR=/Applications/Xcode_26.2.app/Contents/Developer
             xcodebuild -version
-            if [[ "$EXERCISE_SCOPE" != native && "$EXERCISE_SCOPE" != domains && "$EXERCISE_SCOPE" != domain-recheck && "$EXERCISE_SCOPE" != reading && "$EXERCISE_SCOPE" != pictures && "$EXERCISE_SCOPE" != tavern && "$EXERCISE_SCOPE" != setup && "$EXERCISE_SCOPE" != host-onboarding-cancel && "$EXERCISE_SCOPE" != shelf && "$EXERCISE_SCOPE" != collection && "$EXERCISE_SCOPE" != migration && "$EXERCISE_SCOPE" != movie && "$EXERCISE_SCOPE" != game ]]; then
+            if [[ "$EXERCISE_SCOPE" != native && "$EXERCISE_SCOPE" != domains && "$EXERCISE_SCOPE" != domain-recheck && "$EXERCISE_SCOPE" != reading && "$EXERCISE_SCOPE" != pictures && "$EXERCISE_SCOPE" != tavern && "$EXERCISE_SCOPE" != setup && "$EXERCISE_SCOPE" != host-onboarding-cancel && "$EXERCISE_SCOPE" != host-queue-batch && "$EXERCISE_SCOPE" != host-reader-modes && "$EXERCISE_SCOPE" != shelf && "$EXERCISE_SCOPE" != collection && "$EXERCISE_SCOPE" != migration && "$EXERCISE_SCOPE" != movie && "$EXERCISE_SCOPE" != game ]]; then
               npm install -g appium@3.1.2
               appium driver install xcuitest@11.5.0
             fi
-          elif [[ "$HOST_KIND" == macOS ]] || [[ "$EXERCISE_SCOPE" != movie && "$EXERCISE_SCOPE" != game && "$EXERCISE_SCOPE" != domains && "$EXERCISE_SCOPE" != domain-recheck && "$EXERCISE_SCOPE" != reading && "$EXERCISE_SCOPE" != pictures && "$EXERCISE_SCOPE" != tavern && "$EXERCISE_SCOPE" != setup && "$EXERCISE_SCOPE" != host-onboarding-cancel && "$EXERCISE_SCOPE" != shelf && "$EXERCISE_SCOPE" != collection && "$EXERCISE_SCOPE" != migration && "$EXERCISE_SCOPE" != audio ]]; then
+          elif [[ "$HOST_KIND" == macOS ]] || [[ "$EXERCISE_SCOPE" != movie && "$EXERCISE_SCOPE" != game && "$EXERCISE_SCOPE" != domains && "$EXERCISE_SCOPE" != domain-recheck && "$EXERCISE_SCOPE" != reading && "$EXERCISE_SCOPE" != pictures && "$EXERCISE_SCOPE" != tavern && "$EXERCISE_SCOPE" != setup && "$EXERCISE_SCOPE" != host-onboarding-cancel && "$EXERCISE_SCOPE" != host-queue-batch && "$EXERCISE_SCOPE" != host-reader-modes && "$EXERCISE_SCOPE" != shelf && "$EXERCISE_SCOPE" != collection && "$EXERCISE_SCOPE" != migration && "$EXERCISE_SCOPE" != audio ]]; then
             npm install -g appium@2.19.0
             if [[ "$HOST_KIND" == macOS ]]; then
               appium driver install mac2@2.2.2

@@ -92,7 +92,7 @@ struct ReaderTaps: ViewModifier {
     final class Monitor: UIView {
         static let owners = NSMapTable<UIWindowScene, Monitor>.weakToWeakObjects()
         weak var scene: UIWindowScene?
-        var mask: UIInterfaceOrientationMask?
+        private(set) var requestedOrientations: UIInterfaceOrientationMask?
         var preferred = "auto"
         var report: ((Bool) -> Void)?
         private var revision = 0
@@ -104,9 +104,9 @@ struct ReaderTaps: ViewModifier {
         func apply() {
             guard let scene else { return }
             let next: UIInterfaceOrientationMask? = preferred == "landscape" ? .landscape : preferred == "portrait" ? .portrait : nil
-            guard next != mask else { return }
+            guard next != requestedOrientations else { return }
             guard let next else { release(); return }
-            mask = next
+            requestedOrientations = next
             Self.owners.setObject(self, forKey: scene)
             revision += 1
             let attempt = revision
@@ -119,8 +119,8 @@ struct ReaderTaps: ViewModifier {
             } else { UIViewController.attemptRotationToDeviceOrientation() }
         }
         func release() {
-            guard let scene, Self.owners.object(forKey: scene) === self else { mask = nil; return }
-            Self.owners.removeObject(forKey: scene);mask = nil;revision += 1
+            guard let scene, Self.owners.object(forKey: scene) === self else { requestedOrientations = nil; return }
+            Self.owners.removeObject(forKey: scene);requestedOrientations = nil;revision += 1
             notify(false, attempt: revision)
             if #available(iOS 16, *) {
                 invalidate()

@@ -8,7 +8,7 @@
   @MainActor final class ParkAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
       let scene = window?.windowScene
-      if let scene, let mask = ReaderSceneOrientation.Monitor.owners.object(forKey: scene)?.mask { return mask }
+      if let scene, let orientations = ReaderSceneOrientation.Monitor.owners.object(forKey: scene)?.requestedOrientations { return orientations }
       return ReaderSceneOrientation.Monitor.systemMask(scene)
     }
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
